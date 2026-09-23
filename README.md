@@ -76,6 +76,19 @@ Two transports are supported:
 | `mcp` (default) | Jev community server `https://www.jevai.org/api/mcp`, tool `jev_decide` | `$JEV_API_KEY` (`jev_...`) |
 | `official` | TypeSafe `POST https://api.typesafe.ai/v1/systemone` | `$TYPESAFE_API_KEY` |
 
+Both transports answer the same `state` + typed `questions` request.
+
+Community-endpoint notes (observed behavior):
+
+- Do not pass `--jev_model` with official aliases such as `jev-latest`; the
+  endpoint expects identifiers like `typesafe-ai/jev`. By default the model
+  field is omitted so the server chooses.
+- The free endpoint enforces a burst quota and returns transient upstream
+  failures under load. The client retries those with exponential backoff and
+  paces requests (`--jev_min_interval`, default 3s for `mcp`); steps that
+  still fail fall back per `--fallback`, and each decision trace records
+  whether it was a real Jev answer or a fallback.
+
 Both answer the same `state` + typed `questions` request.
 
 ## Usage

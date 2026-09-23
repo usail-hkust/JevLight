@@ -75,11 +75,13 @@ def parse_args():
     )
     parser.add_argument(
         "--jev_model",
-        default=DEFAULT_JEV_MODEL,
+        default=None,
         help=(
-            "Model ID passed through to the endpoint; official default is "
-            f"{DEFAULT_JEV_MODEL}. Pass an empty string to let the server "
-            "choose (recommended for the community endpoint)"
+            "Model ID passed through to the endpoint. Default: omit the "
+            "field so the server chooses (required for the community MCP "
+            "endpoint, which rejects official aliases like jev-latest and "
+            "expects identifiers such as typesafe-ai/jev); for the official "
+            f"transport the default becomes {DEFAULT_JEV_MODEL}"
         ),
     )
     parser.add_argument(
@@ -107,6 +109,16 @@ def parse_args():
         type=int,
         default=3,
         help="Retry attempts on rate-limit/network errors (default: 3)",
+    )
+    parser.add_argument(
+        "--jev_min_interval",
+        type=float,
+        default=None,
+        help=(
+            "Minimum seconds between Jev requests (pacing for the burst "
+            "quota on the community endpoint). Default: 3s for mcp, 0 for "
+            "official"
+        ),
     )
     parser.add_argument(
         "--packaging",
@@ -283,13 +295,21 @@ def run(args):
     run_id = f"jevlight_{Path(args.traffic_file).stem}_{timestamp}_pid{os.getpid()}"
     agent_config, env_config, paths = build_configs(args, dataset_config, run_id)
 
+    min_interval = args.jev_min_interval
+    if min_interval is None:
+        min_interval = 3.0 if args.jev_transport == "mcp" else 0.0
     client = JevClient(
         transport=args.jev_transport,
-        model=args.jev_model or None,
+        model=(
+            (args.jev_model or DEFAULT_JEV_MODEL)
+            if args.jev_transport == "official"
+            else args.jev_model
+        ),
         api_key=api_key,
         base_url=args.jev_base_url,
         timeout=args.jev_timeout,
         max_retries=args.jev_retries,
+        min_interval=min_interval,
         mock=args.mock_jev,
     )
     controller = JevLightController(

@@ -36,6 +36,9 @@ JEV_DECIDE_TOOL = "jev_decide"
 # Cloudflare bans default Python user agents on the community endpoint.
 MCP_USER_AGENT = "curl/8.5.0"
 RATE_LIMIT_MARKERS = ("too many requests", "rate limit", "try again later")
+# Transient upstream failures observed on the community endpoint; retried
+# with backoff like rate limits.
+TRANSIENT_MARKERS = ("could not be completed", "overloaded", "temporarily")
 
 
 def resolve_jev_api_key(explicit: Optional[str] = None) -> Optional[str]:
@@ -73,6 +76,7 @@ class JevClient:
         base_url: Optional[str] = None,
         timeout: float = 30.0,
         max_retries: int = 3,
+        min_interval: float = 0.0,
         mock: bool = False,
     ):
         if transport not in JEV_TRANSPORTS:
@@ -84,7 +88,9 @@ class JevClient:
         self.api_key = resolve_jev_api_key(api_key)
         self.timeout = float(timeout)
         self.max_retries = max(0, int(max_retries))
+        self.min_interval = max(0.0, float(min_interval))
         self.mock = mock
+        self._last_request_time = 0.0
         if transport == "mcp":
             self.base_url = (base_url or DEFAULT_MCP_BASE_URL).rstrip("/")
         else:
@@ -92,6 +98,7 @@ class JevClient:
         self._sdk_client = None
         self._sdk_lock = threading.Lock()
         self._mcp_session = None
+        self._mcp_initialized = False
         if not mock:
             if self.api_key is None:
                 raise ValueError(
@@ -119,11 +126,21 @@ class JevClient:
         started = time.time()
         if self.mock:
             return self._mock_evaluate(state, questions, started)
+        self._pace()
         if self.transport == "mcp":
             return self._evaluate_mcp(state, questions, started)
         if self._sdk_client is not None:
             return self._evaluate_sdk(state, questions, started)
         return self._evaluate_official_rest(state, questions, started)
+
+    def _pace(self) -> None:
+        """Sleep so consecutive decisions stay at least ``min_interval`` apart."""
+        if self.min_interval <= 0:
+            return
+        elapsed = time.time() - self._last_request_time
+        if 0 <= elapsed < self.min_interval:
+            time.sleep(self.min_interval - elapsed)
+        self._last_request_time = time.time()
 
     # ------------------------------------------------------------------ #
     # Community MCP transport
@@ -161,6 +178,9 @@ class JevClient:
 
     def _mcp_initialize(self) -> None:
         """Best-effort MCP handshake; the community server is stateless."""
+        if self._mcp_initialized:
+            return
+        self._mcp_initialized = True
         try:
             result = self._mcp_post({
                 "jsonrpc": "2.0",
@@ -207,7 +227,8 @@ class JevClient:
                 result = self._mcp_post(payload)
                 if result.get("isError"):
                     text = self._mcp_result_text(result)
-                    if self._is_rate_limited(text) and attempt < self.max_retries:
+                    if self._should_retry(text) and attempt < self.max_retries:
+                        self._pace()
                         time.sleep(delay)
                         delay *= 2
                         continue
@@ -220,6 +241,7 @@ class JevClient:
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 if self._is_rate_limited(message) and attempt < self.max_retries:
+                    self._pace()
                     time.sleep(delay)
                     delay *= 2
                     continue
@@ -249,6 +271,13 @@ class JevClient:
     def _is_rate_limited(message: str) -> bool:
         lowered = (message or "").lower()
         return any(marker in lowered for marker in RATE_LIMIT_MARKERS)
+
+    @staticmethod
+    def _should_retry(message: str) -> bool:
+        """Rate limits and transient upstream failures are worth retrying."""
+        lowered = (message or "").lower()
+        markers = RATE_LIMIT_MARKERS + TRANSIENT_MARKERS
+        return any(marker in lowered for marker in markers)
 
     def _parse_decide_result(
         self,
