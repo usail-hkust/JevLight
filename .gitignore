@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Run artifacts
+records/
+model/
+errors/
+debug/
+
+# Environments and secrets
+.env
+*.key
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
