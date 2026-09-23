@@ -89,8 +89,6 @@ Community-endpoint notes (observed behavior):
   still fail fall back per `--fallback`, and each decision trace records
   whether it was a real Jev answer or a fallback.
 
-Both answer the same `state` + typed `questions` request.
-
 ## Usage
 
 ```bash
