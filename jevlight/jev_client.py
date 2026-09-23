@@ -122,11 +122,16 @@ class JevClient:
         state: Any,
         questions: Mapping[str, Any],
     ) -> JevResult:
-        """Evaluate ``questions`` against ``state`` in one Jev request."""
-        started = time.time()
+        """Evaluate ``questions`` against ``state`` in one Jev request.
+
+        ``latency`` in the result starts after the pacing sleep (which is
+        self-imposed waiting, not service time) but includes retry backoff —
+        that is the real time the control loop waits for an answer.
+        """
         if self.mock:
-            return self._mock_evaluate(state, questions, started)
+            return self._mock_evaluate(state, questions, time.time())
         self._pace()
+        started = time.time()
         if self.transport == "mcp":
             return self._evaluate_mcp(state, questions, started)
         if self._sdk_client is not None:
