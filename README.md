@@ -120,7 +120,7 @@ python run_jevlight.py --agent collmlight # CoLLMLight request pattern
 
 ## 3D visualization (SUMO)
 
-`scripts/serve_3d.py` runs (or attaches to) a SUMO simulation and streams it to a JS 3D viewer (three.js, no build step) — roads, live vehicles, and traffic-light states with play/pause/step/speed controls:
+`scripts/serve_3d.py` runs (or attaches to) a SUMO simulation and streams it to a city-scale 3D viewer (three.js, no build step): asphalt lanes with sidewalks, dashed lane markings, stop lines and zebra crossings, procedural street buildings with sun and soft shadows, vehicle models by SUMO vehicle class (car / bus / truck / two-wheeler, colored per vehicle), traffic-light heads, and play/pause/step/speed controls:
 
 ```bash
 python scripts/serve_3d.py                    # Jinan at 1x, open http://127.0.0.1:8300
@@ -128,6 +128,8 @@ python scripts/serve_3d.py --speed 4          # 4x playback
 python scripts/serve_3d.py --attach 127.0.0.1:8813   # watch an already-running SUMO
 python scripts/serve_3d.py --sumo_args "--seed 3"    # extra SUMO flags
 ```
+
+**Traffic-camera mode**: click `📹 Cam` (or 🎲) to install a virtual surveillance camera at a random junction, or click any junction in the camera list to switch. The page then shows a 2×2 grid of live views — one per approach direction (北/东/南/西 labeled) — rendered from pole-mounted cameras at that intersection, with a pole marker visible in the main 3D view.
 
 Architecture: one thread owns the traci connection (vehicle subscriptions + TLS states per step) and publishes snapshots; browsers get the network once via `GET /api/network` and per-step frames over SSE (`GET /api/stream`); `POST /api/command` drives play/pause/step/speed. traci positions are shifted into net coordinates so vehicles and lane geometry share one frame. On an HPC login node, port-forward with `ssh -L 8300:127.0.0.1:8300`; the page needs internet access once to load three.js from the CDN (or vendor `three.module.js` into `viz/js/` and drop the import map).
 
