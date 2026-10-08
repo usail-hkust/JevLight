@@ -107,7 +107,14 @@ export function buildSignals(scene, net) {
           scene.add(lamp);
           lamps[kind] = lamp;
         });
-        heads.push({ lamps, indices: laneLinks[approach.lane] || null });
+        // Union of the signal links of EVERY lane on this approach: the
+        // first lane is often the right-turn lane, whose signal stays
+        // green most of the cycle — the union follows the real phase.
+        const indices = [];
+        for (const laneId of approach.lanes || []) {
+          indices.push(...(laneLinks[laneId] || []));
+        }
+        heads.push({ lamps, indices: indices.length ? indices : null });
       }
     } else {
       // Compact fallback: one pole + housing per junction.

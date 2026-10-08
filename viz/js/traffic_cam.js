@@ -20,7 +20,7 @@ function compassLabel(bearingDeg) {
 }
 
 /** The approach view directions of one junction: outward unit vectors with
- *  the incoming lane id of each approach (used for exact signal coloring),
+ *  ALL incoming lane ids of each approach (used for exact signal coloring),
  *  deduplicated into bearing buckets and sorted for a stable layout. */
 export function junctionApproaches(net, junction, maxViews = 4) {
   const buckets = new Map();
@@ -38,25 +38,26 @@ export function junctionApproaches(net, junction, maxViews = 4) {
     dy /= len;
     const bearing = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
     const key = Math.round(bearing / 30) % 12;
-    if (!buckets.has(key) || buckets.get(key).bearing > bearing) {
-      buckets.set(key, { dx: -dx, dy: -dy, bearing, lane: lane.id });
+    if (!buckets.has(key)) {
+      buckets.set(key, { dx: -dx, dy: -dy, bearing, lanes: [] });
     }
+    buckets.get(key).lanes.push(lane.id);
   }
   const approaches = [...buckets.values()].sort((a, b) => a.bearing - b.bearing);
   if (!approaches.length) {
     // Isolated junction: fall back to the four cardinal directions.
     return [
-      { dx: 0, dy: 1, bearing: 0, lane: null },
-      { dx: 1, dy: 0, bearing: 90, lane: null },
-      { dx: 0, dy: -1, bearing: 180, lane: null },
-      { dx: -1, dy: 0, bearing: 270, lane: null },
+      { dx: 0, dy: 1, bearing: 0, lanes: [] },
+      { dx: 1, dy: 0, bearing: 90, lanes: [] },
+      { dx: 0, dy: -1, bearing: 180, lanes: [] },
+      { dx: -1, dy: 0, bearing: 270, lanes: [] },
     ];
   }
   return approaches.slice(0, maxViews).map((a) => ({
     dx: a.dx,
     dy: a.dy,
     bearing: a.bearing,
-    lane: a.lane,
+    lanes: a.lanes,
   }));
 }
 
