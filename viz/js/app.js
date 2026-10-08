@@ -323,6 +323,11 @@ function connectStream() {
   });
   source.addEventListener("frame", (event) => {
     const frame = JSON.parse(event.data);
+    if (frame.ended) {
+      showBanner("simulation ended — restart the server for a fresh run");
+      setPlaying(false);
+      return;
+    }
     fleet.update(frame.vehicles);
     updateTrafficLights(frame.tls);
     updateHud(frame);

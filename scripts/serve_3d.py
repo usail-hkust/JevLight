@@ -67,6 +67,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--count", type=int, default=0, help="Stop stepping after N steps")
+    parser.add_argument(
+        "--loop",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Relaunch SUMO when the simulation ends (default: on)",
+    )
     parser.add_argument("--host", default=DEFAULT_VIZ_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_VIZ_PORT)
     parser.add_argument("--viz_dir", default=str(DEFAULT_VIZ_DIR))
@@ -84,8 +90,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         import traci
 
         host, _, port = args.attach.partition(":")
-        traci.connect(host, int(port), label=TRACI_LABEL)
-        conn = traci.getConnection(TRACI_LABEL)
+
+        def launch():
+            traci.connect(host, int(port), label=TRACI_LABEL)
+            return traci.getConnection(TRACI_LABEL)
+
+        conn = launch()
         print(f"[viz] attached to SUMO at {args.attach}", flush=True)
     else:
         import traci
@@ -96,10 +106,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "--route-files", route_path,
             "--no-step-log", "true",
         ] + shlex.split(args.sumo_args)
-        print(f"[viz] starting SUMO: {' '.join(cmd)}", flush=True)
-        # traci.start returns the handshake results, not the connection.
-        traci.start(cmd, label=TRACI_LABEL)
-        conn = traci.getConnection(TRACI_LABEL)
+
+        def launch():
+            print(f"[viz] starting SUMO: {' '.join(cmd)}", flush=True)
+            # traci.start returns the handshake results, not the connection.
+            traci.start(cmd, label=TRACI_LABEL)
+            return traci.getConnection(TRACI_LABEL)
+
+        conn = launch()
     step_length = float(conn.simulation.getDeltaT())
 
     runtime = SumoRuntime(
@@ -108,6 +122,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         speed=args.speed,
         offset=tuple(network.payload["offset"]),  # type: ignore[arg-type]
         max_steps=args.count,
+        restart=launch if args.loop else None,
     )
     thread = threading.Thread(target=runtime.run, name="sumo-runtime", daemon=True)
     thread.start()

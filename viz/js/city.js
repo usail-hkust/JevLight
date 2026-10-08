@@ -522,6 +522,28 @@ export function buildCity(net) {
 
   const markings = buildMarkings(net);
   if (markings) group.add(markings);
+
+  // Junction interiors: lanes stop at the crossing boundary, so fill the
+  // junction polygons with asphalt or the crossings stay grass.
+  if (net.junctions) {
+    for (const junction of net.junctions) {
+      const points = junction.shape;
+      if (!points || points.length < 3) continue;
+      const shape = new THREE.Shape();
+      shape.moveTo(points[0][0], -points[0][1]);
+      for (let i = 1; i < points.length; i++) {
+        shape.lineTo(points[i][0], -points[i][1]);
+      }
+      const geometry = new THREE.ShapeGeometry(shape);
+      // (x, -y_net, 0) -> (x, 0, y_net); the front normal faces up.
+      geometry.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geometry, asphaltMaterial);
+      mesh.position.y = 0.03;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+  }
+
   group.add(buildBuildings(net, grid));
   group.add(buildTrees(net, grid));
   return group;

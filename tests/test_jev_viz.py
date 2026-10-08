@@ -111,6 +111,10 @@ class TestNetworkModel:
             assert -1e6 < x < 1e6 and -1e6 < y < 1e6
         tls_ids = {entry["id"] for entry in payload["tls"]}
         assert len(tls_ids) == 12
+        # Junction interior polygons (asphalt fill at crossings).
+        assert payload["junctions"], "expected junction fill polygons"
+        for junction in payload["junctions"]:
+            assert len(junction["shape"]) >= 3
         # Per-tls incoming-lane -> signal-link index map for exact head
         # coloring in the frontend.
         for entry in payload["tls"]:
@@ -189,6 +193,50 @@ class TestSumoRuntime:
             time.sleep(0.2)
             assert conn.steps == 2
             assert runtime.playing is False
+        finally:
+            runtime.close()
+            thread.join(timeout=5)
+
+    def test_dead_connection_restarts_via_hook(self):
+        class DyingConn(FakeConn):
+            def simulationStep(self):
+                if self.steps >= 2:
+                    raise RuntimeError("Connection closed by SUMO.")
+                super().simulationStep()
+
+        dying = DyingConn()
+        fresh = FakeConn()
+        launches = []
+
+        def restart():
+            launches.append(1)
+            return fresh
+
+        runtime = viz_server.SumoRuntime(
+            dying, step_length=0.001, speed=1000.0, restart=restart
+        )
+        thread = threading.Thread(target=runtime.run, daemon=True)
+        thread.start()
+        try:
+            assert wait_for(lambda: fresh.steps >= 2)
+            assert launches, "restart hook was not called"
+            assert runtime.conn is fresh
+            assert runtime.ended is False
+        finally:
+            runtime.close()
+            thread.join(timeout=5)
+
+    def test_dead_connection_without_hook_marks_ended(self):
+        class DyingConn(FakeConn):
+            def simulationStep(self):
+                raise RuntimeError("Connection closed by SUMO.")
+
+        runtime = viz_server.SumoRuntime(DyingConn(), step_length=0.001, speed=1000.0)
+        thread = threading.Thread(target=runtime.run, daemon=True)
+        thread.start()
+        try:
+            assert wait_for(lambda: runtime.ended)
+            assert runtime.frame.get("ended") is True
         finally:
             runtime.close()
             thread.join(timeout=5)

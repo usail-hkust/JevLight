@@ -144,6 +144,20 @@ class NetworkModel:
                 "lane_links": lane_links,
             })
         (min_x, min_y), (max_x, max_y) = net.getBBoxXY()
+        junctions: List[Dict[str, Any]] = []
+        for node in net.getNodes():
+            try:
+                shape = node.getShape() or []
+            except Exception:
+                continue
+            if len(shape) < 3:
+                continue  # dead-ends have no area to fill
+            poly = [[round(float(x), 2), round(float(y), 2)] for x, y in shape]
+            xs = [point[0] for point in poly]
+            ys = [point[1] for point in poly]
+            if max(xs) - min(xs) < 4 and max(ys) - min(ys) < 4:
+                continue  # degenerate sliver
+            junctions.append({"shape": poly})
         return cls({
             "offset": [float(offset_x), float(offset_y)],
             "bounds": {
@@ -152,6 +166,7 @@ class NetworkModel:
             },
             "lanes": lanes,
             "tls": traffic_lights,
+            "junctions": junctions,
         })
 
 
@@ -277,12 +292,15 @@ class SumoRuntime(_RuntimeBase):
         offset: Tuple[float, float] = (0.0, 0.0),
         max_steps: int = 0,
         playing: bool = True,
+        restart=None,
     ):
         super().__init__(step_length, offset)
         self.conn = conn
         self.speed = max(0.01, float(speed))
         self.max_steps = max(0, int(max_steps))
         self.playing = bool(playing)
+        self.restart = restart
+        self.ended = False
         self.commands: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self._step_requests = 0
 
@@ -297,17 +315,39 @@ class SumoRuntime(_RuntimeBase):
     def run(self) -> None:
         try:
             while not self.stop_event.is_set():
-                started = time.time()
-                self._drain_commands()
                 stepped = False
-                if self.playing or self._step_requests > 0:
-                    if not self.playing:
-                        self._step_requests -= 1
-                    self._step()
-                    stepped = True
-                    if self.max_steps and self._seq >= self.max_steps:
-                        self.playing = False
-                self._publish()
+                try:
+                    started = time.time()
+                    self._drain_commands()
+                    if self.playing or self._step_requests > 0:
+                        if not self.playing:
+                            self._step_requests -= 1
+                        self._step()
+                        stepped = True
+                        if self.max_steps and self._seq >= self.max_steps:
+                            self.playing = False
+                    self._publish()
+                except Exception as exc:
+                    # SUMO died (simulation end / crash).  With a restart
+                    # hook (standalone loop mode) relaunch it; otherwise
+                    # flag the final frame and stop.
+                    if self.restart and not self.stop_event.is_set():
+                        print(
+                            f"[viz] SUMO ended ({type(exc).__name__}: {exc}); "
+                            "restarting",
+                            flush=True,
+                        )
+                        try:
+                            self.conn = self.restart()
+                            self._subscribed.clear()
+                            continue
+                        except Exception as restart_exc:
+                            print(f"[viz] restart failed: {restart_exc}", flush=True)
+                    self.ended = True
+                    with self.lock:
+                        self.frame = {**self.frame, "ended": True}
+                        self.lock.notify_all()
+                    return
                 if stepped:
                     target = self.step_length / self.speed
                     elapsed = time.time() - started
