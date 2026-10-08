@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JevLight 3D — SUMO visualizer</title>
+  <style>
+    :root {
+      --bg: #0b0e13;
+      --panel: rgba(15, 19, 26, 0.92);
+      --line: #232a36;
+      --text: #d7dde8;
+      --muted: #7d8798;
+      --accent: #4f9cf9;
+      --green: #3ddc84;
+      --red: #ff5d5d;
+      --yellow: #ffd166;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
+    body { font: 13px/1.45 "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--text); }
+    #scene { position: fixed; inset: 0; display: block; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      display: flex; gap: 10px; align-items: flex-start; pointer-events: none;
+    }
+    .panel {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 14px; pointer-events: auto;
+    }
+    #title { font-weight: 700; letter-spacing: 0.04em; }
+    #title small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+    #stats { display: flex; gap: 18px; align-items: baseline; }
+    .stat b { font-size: 16px; color: #fff; }
+    .stat span { color: var(--muted); }
+    #controls { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+    button, select {
+      background: #151b25; color: var(--text); border: 1px solid var(--line);
+      border-radius: 7px; padding: 6px 12px; font: inherit; cursor: pointer;
+    }
+    button:hover, select:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 700; }
+    #tlsbar {
+      position: fixed; bottom: 12px; left: 12px; display: flex; flex-wrap: wrap;
+      gap: 6px; max-width: 60%;
+    }
+    .tls {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+      padding: 4px 8px; display: flex; gap: 6px; align-items: center;
+    }
+    .tls .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .tls.g .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .tls.y .dot { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .tls.r .dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    #help {
+      position: fixed; bottom: 12px; right: 12px; color: var(--muted);
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 8px 12px;
+    }
+    #banner {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 15px; z-index: -1;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="banner">loading SUMO network…</div>
+  <div id="hud">
+    <div class="panel" id="title">JEVLIGHT&nbsp;3D<small>SUMO live visualization</small></div>
+    <div class="panel" id="stats">
+      <div class="stat"><b id="time">0</b> <span>s</span></div>
+      <div class="stat"><b id="vehicles">0</b> <span>vehicles</span></div>
+      <div class="stat"><b id="rate">–</b> <span>steps/s</span></div>
+    </div>
+    <div class="panel" id="controls">
+      <button id="play" class="primary">⏸ Pause</button>
+      <button id="step">⏭ Step</button>
+      <select id="speed" title="simulation speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+      <button id="cam" title="reset camera">⟳ Cam</button>
+    </div>
+  </div>
+  <div id="tlsbar"></div>
+  <div id="help">drag&nbsp;·&nbsp;orbit&nbsp;&nbsp;|&nbsp;&nbsp;wheel&nbsp;·&nbsp;zoom&nbsp;&nbsp;|&nbsp;&nbsp;right-drag&nbsp;·&nbsp;pan</div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

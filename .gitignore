@@ -8,6 +8,10 @@ records/
 model/
 errors/
 debug/
+logs/
+
+# Local model serving (scripts/serve_jev.sh)
+.venv-jev/
 
 # Environments and secrets
 .env

@@ -40,8 +40,21 @@ from jevlight.observation import (
 
 JEV_PACKAGINGS = ("network", "per_intersection")
 JEV_FALLBACKS = ("previous", "ranking")
+# Agent modes: ``jevlight`` is this repo's native mapping; ``llmlight`` and
+# ``collmlight`` reproduce the request pattern and prompt wording of the two
+# migrated ChatLight baselines on the same Jev wire format.
+AGENT_MODES = ("jevlight", "llmlight", "collmlight")
 PHASE_QUESTION_PREFIX = "phase_"
 CONGESTION_QUESTION_PREFIX = "congested_"
+
+# Packaging and speculative-question defaults per agent mode: LLMLight is a
+# per-intersection agent with no congestion judgment; CoLLMLight and JevLight
+# decide with one network-wide state per step.
+AGENT_MODE_DEFAULTS = {
+    "jevlight": {"packaging": "network", "speculative": True},
+    "llmlight": {"packaging": "per_intersection", "speculative": False},
+    "collmlight": {"packaging": "network", "speculative": True},
+}
 
 
 # ---------------------------------------------------------------------- #
@@ -148,6 +161,77 @@ def phase_question(
     }
 
 
+def llmlight_phase_question(
+    observation: IntersectionObservation,
+    phase_duration: float,
+    state_path: str = "intersection",
+) -> Dict[str, Any]:
+    """LLMLight-style prompt: one agent per intersection, local view only.
+
+    Wording follows LLMLight's original per-intersection signal-control
+    prompt (the intersection's own lanes and current pressure, no network
+    context); the wire format stays one Jev ``choice`` question.
+    """
+    criteria = phase_criteria(observation)
+    duration = (
+        int(phase_duration) if float(phase_duration).is_integer() else phase_duration
+    )
+    instructions = (
+        f"You are the signal control agent for intersection `{state_path}`. "
+        f"The intersection state at `{state_path}` lists every "
+        "signal-controlled lane with queued vehicles, approaching vehicles "
+        "by distance segment (segment 1 is nearest the junction), and "
+        "average waiting time. Select the signal phase to activate for the "
+        f"next {duration} seconds to minimize the intersection's queue "
+        "length and vehicle waiting time. Movements whose lanes hold "
+        "heavier queues, more approaching vehicles, or longer waits need "
+        "the green signal sooner; the current phase's lanes have already "
+        "been moving."
+    )
+    return {
+        "type": "choice",
+        "instructions": instructions,
+        "criteria": criteria,
+    }
+
+
+def collmlight_phase_question(
+    observation: IntersectionObservation,
+    phase_duration: float,
+    state_path: str,
+    network_size: int,
+) -> Dict[str, Any]:
+    """CoLLMLight-style prompt: one network-level agent, coordinated view.
+
+    Wording follows CoLLMLight's network-wise signal-control prompt: the
+    agent sees the whole road network in one shared state and answers one
+    question per intersection, coordinating with neighbouring junctions.
+    """
+    criteria = phase_criteria(observation)
+    duration = (
+        int(phase_duration) if float(phase_duration).is_integer() else phase_duration
+    )
+    instructions = (
+        f"You are the network-level signal control agent coordinating "
+        f"{network_size} signalized intersections that share one state. For "
+        f"intersection `{state_path}`, choose the signal phase to activate "
+        f"for the next {duration} seconds to reduce congestion at this "
+        "junction and across the network. Judge each phase option by the "
+        f"lanes it serves in `{state_path}.lanes` — queued vehicles, "
+        "approaching vehicles by segment (segment 1 is nearest the "
+        "junction), and average waiting time — while keeping the timing "
+        "coordinated with the neighbouring junctions listed under "
+        f"`{state_path}.neighbours`. Heavier pressure on a phase's lanes "
+        "makes that phase the better choice; the current phase's lanes "
+        "have already been moving."
+    )
+    return {
+        "type": "choice",
+        "instructions": instructions,
+        "criteria": criteria,
+    }
+
+
 def congestion_question(state_path: str) -> Dict[str, Any]:
     """Speculative congestion Noul, logged for analysis (near-zero cost)."""
     return {
@@ -158,6 +242,88 @@ def congestion_question(state_path: str) -> Dict[str, Any]:
             "vehicle queues or extreme waiting times?"
         ),
     }
+
+
+# ---------------------------------------------------------------------- #
+# MaxPressure baseline (no decision model)
+# ---------------------------------------------------------------------- #
+
+
+def phase_pressure(observation: IntersectionObservation, phase: str) -> float:
+    """Classic max-pressure score of one canonical phase.
+
+    Pressure = queued + approaching vehicles on the two lanes the phase
+    serves (LLMLight's MaxPressure semantics, matching the mock Jev's
+    ``queue + approaching`` scoring).
+    """
+    pressure = 0.0
+    for lane_name in (phase[:2], phase[2:]):
+        lane = observation.lanes[lane_name]
+        pressure += float(lane.queue)
+        pressure += float(sum(lane.llmlight_cells))
+    return pressure
+
+
+class MaxPressureController:
+    """Non-LLM MaxPressure baseline: no Jev, no requests, pure local state.
+
+    Exposes the same ``decide``/``usage_summary`` surface as
+    :class:`JevLightController` so the runner's control loop is unchanged;
+    every decision is the argmax-pressure phase of the intersection's own
+    observation.
+    """
+
+    def __init__(self, phase_duration: float):
+        self.phase_duration = phase_duration
+
+    @staticmethod
+    def _phase_to_action(observation: IntersectionObservation, phase: str) -> int:
+        for index, available in enumerate(observation.phases):
+            if canonical_phase_name(available) == canonical_phase_name(phase):
+                return index
+        return 0
+
+    def decide(
+        self,
+        observations: Sequence[IntersectionObservation],
+        step: int,
+    ) -> Tuple[Dict[str, int], List[Dict[str, Any]]]:
+        actions: Dict[str, int] = {}
+        traces: List[Dict[str, Any]] = []
+        for observation in observations:
+            scores: Dict[str, float] = {}
+            for phase in observation.phases:
+                canonical = canonical_phase_name(phase)
+                if canonical not in scores:
+                    scores[canonical] = phase_pressure(observation, canonical)
+            best = max(sorted(scores), key=scores.get)
+            actions[observation.intersection_id] = self._phase_to_action(
+                observation, best
+            )
+            traces.append({
+                "step": step,
+                "intersection": observation.intersection_id,
+                "controller": "maxpressure",
+                "agent_mode": "maxpressure",
+                "packaging": "none",
+                "transport": "local",
+                "model": "maxpressure",
+                "signal": best,
+                "pressures": scores,
+                "fallback": None,
+            })
+        return actions, traces
+
+    def usage_summary(self) -> Dict[str, Any]:
+        return {
+            "requests": 0,
+            "failures": 0,
+            "rate_limited": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "latency_mean_s": None,
+            "latency_max_s": None,
+        }
 
 
 # ---------------------------------------------------------------------- #
@@ -183,7 +349,12 @@ class JevLightController:
         min_confidence: float = 0.0,
         speculative: bool = True,
         max_workers: int = 8,
+        agent_mode: str = "jevlight",
     ):
+        if agent_mode not in AGENT_MODES:
+            raise ValueError(
+                f"agent_mode must be one of {AGENT_MODES}, got {agent_mode}"
+            )
         if packaging not in JEV_PACKAGINGS:
             raise ValueError(
                 f"packaging must be one of {JEV_PACKAGINGS}, got {packaging}"
@@ -201,6 +372,7 @@ class JevLightController:
         self.min_confidence = float(min_confidence)
         self.speculative = speculative
         self.max_workers = max(1, int(max_workers))
+        self.agent_mode = agent_mode
         self.previous_signals: Dict[str, str] = {}
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -210,6 +382,26 @@ class JevLightController:
         self.latencies: List[float] = []
 
     # -- helpers ------------------------------------------------------- #
+
+    def _phase_question(
+        self,
+        observation: IntersectionObservation,
+        state_path: str,
+        network_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """The phase Choice question worded for the active agent mode."""
+        if self.agent_mode == "llmlight":
+            return llmlight_phase_question(
+                observation, self.phase_duration, state_path
+            )
+        if self.agent_mode == "collmlight":
+            return collmlight_phase_question(
+                observation,
+                self.phase_duration,
+                state_path,
+                network_size or 1,
+            )
+        return phase_question(observation, self.phase_duration, state_path)
 
     @staticmethod
     def _phase_to_action(observation: IntersectionObservation, phase: str) -> int:
@@ -301,6 +493,7 @@ class JevLightController:
             "step": step,
             "intersection": observation.intersection_id,
             "controller": "jevlight",
+            "agent_mode": self.agent_mode,
             "packaging": self.packaging,
             "transport": self.client.transport,
             "model": self.client.model or "server-default",
@@ -366,7 +559,9 @@ class JevLightController:
         for observation in active:
             state_path = f"intersections.{observation.intersection_id}"
             questions[f"{PHASE_QUESTION_PREFIX}{observation.intersection_id}"] = (
-                phase_question(observation, self.phase_duration, state_path)
+                self._phase_question(
+                    observation, state_path, network_size=len(observations)
+                )
             )
             if self.speculative:
                 questions[
@@ -400,9 +595,7 @@ class JevLightController:
             state = jev_intersection_state(observation, self.phase_duration)
             questions: Dict[str, Any] = {
                 f"{PHASE_QUESTION_PREFIX}{observation.intersection_id}": (
-                    phase_question(
-                        observation, self.phase_duration, "intersection"
-                    )
+                    self._phase_question(observation, "intersection")
                 )
             }
             if self.speculative:

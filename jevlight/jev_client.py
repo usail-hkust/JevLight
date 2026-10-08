@@ -1,6 +1,7 @@
-"""Client for Jev decisions: community MCP endpoint or the official TypeSafe API.
+"""Client for Jev decisions: community MCP, official TypeSafe API, or a local
+Jev-compatible server.
 
-Two transports are supported:
+Three transports are supported:
 
 - ``mcp`` (default): the Jev community server at
   ``https://www.jevai.org/api/mcp``, called as a stateless MCP streamable-HTTP
@@ -11,8 +12,14 @@ Two transports are supported:
 - ``official``: the TypeSafe System One API (``POST /v1/systemone``) via the
   official ``typesafe-sdk`` when installed, with an equivalent raw-REST
   fallback.  Key: ``$TYPESAFE_API_KEY``.
+- ``local``: any self-hosted server that speaks the same System One wire
+  format (``POST /v1/systemone``) — e.g. the open Jev-style ecosystem (Laya
+  via Ollaya, Jebadiah, Vev, WaterSheep, openjev-sglang, ...) or this repo's
+  own ``jevlight.local_server`` adapter over vLLM (see
+  ``scripts/serve_jev.sh``).  No API key required; base URL defaults to
+  ``$JEV_LOCAL_BASE_URL`` or ``http://127.0.0.1:8123``.
 
-Both transports answer the same semantic request — a ``state`` plus a map of
+All transports answer the same semantic request — a ``state`` plus a map of
 typed ``questions`` (``choice`` / ``noul`` / ``score``) — and are normalized
 into the same :class:`JevResult`.
 """
@@ -30,7 +37,9 @@ from typing import Any, Dict, List, Mapping, Optional
 DEFAULT_JEV_MODEL = "jev-latest"
 DEFAULT_MCP_BASE_URL = "https://www.jevai.org/api/mcp"
 DEFAULT_OFFICIAL_BASE_URL = "https://api.typesafe.ai"
-JEV_TRANSPORTS = ("mcp", "official")
+DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8123"
+LOCAL_BASE_URL_ENV_VAR = "JEV_LOCAL_BASE_URL"
+JEV_TRANSPORTS = ("mcp", "official", "local")
 JEV_API_KEY_ENV_VARS = ("JEV_API_KEY", "TYPESAFE_API_KEY")
 JEV_DECIDE_TOOL = "jev_decide"
 # Cloudflare bans default Python user agents on the community endpoint.
@@ -71,7 +80,7 @@ class JevClient:
     def __init__(
         self,
         transport: str = "mcp",
-        model: Optional[str] = DEFAULT_JEV_MODEL,
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout: float = 30.0,
@@ -85,7 +94,12 @@ class JevClient:
             )
         self.transport = transport
         self.model = model
-        self.api_key = resolve_jev_api_key(api_key)
+        # The local transport never resolves keys from the environment: a
+        # hosted $JEV_API_KEY must not leak to third-party local servers.
+        # An explicitly passed key is still sent (guarded local servers).
+        self.api_key = (
+            api_key if transport == "local" else resolve_jev_api_key(api_key)
+        )
         self.timeout = float(timeout)
         self.max_retries = max(0, int(max_retries))
         self.min_interval = max(0.0, float(min_interval))
@@ -93,6 +107,12 @@ class JevClient:
         self._last_request_time = 0.0
         if transport == "mcp":
             self.base_url = (base_url or DEFAULT_MCP_BASE_URL).rstrip("/")
+        elif transport == "local":
+            self.base_url = (
+                base_url
+                or os.environ.get(LOCAL_BASE_URL_ENV_VAR)
+                or DEFAULT_LOCAL_BASE_URL
+            ).rstrip("/")
         else:
             self.base_url = (base_url or DEFAULT_OFFICIAL_BASE_URL).rstrip("/")
         self._sdk_client = None
@@ -100,7 +120,7 @@ class JevClient:
         self._mcp_session = None
         self._mcp_initialized = False
         if not mock:
-            if self.api_key is None:
+            if self.api_key is None and transport != "local":
                 raise ValueError(
                     "Jev API key missing: pass api_key or set one of "
                     + ", ".join(JEV_API_KEY_ENV_VARS)
@@ -134,9 +154,26 @@ class JevClient:
         started = time.time()
         if self.transport == "mcp":
             return self._evaluate_mcp(state, questions, started)
+        if self.transport == "local":
+            # Local Jev-compatible server: no key needed, and the ``model``
+            # field is only sent when the caller chose one — the server may
+            # host a single open-weight checkpoint that picks itself.
+            return self._evaluate_systemone_rest(
+                state,
+                questions,
+                started,
+                model_field=self.model,
+                authorized=self.api_key is not None,
+            )
         if self._sdk_client is not None:
             return self._evaluate_sdk(state, questions, started)
-        return self._evaluate_official_rest(state, questions, started)
+        return self._evaluate_systemone_rest(
+            state,
+            questions,
+            started,
+            model_field=self.model or DEFAULT_JEV_MODEL,
+            authorized=True,
+        )
 
     def _pace(self) -> None:
         """Sleep so consecutive decisions stay at least ``min_interval`` apart."""
@@ -372,28 +409,38 @@ class JevClient:
             latency=time.time() - started,
         )
 
-    def _evaluate_official_rest(
+    def _evaluate_systemone_rest(
         self,
         state: Any,
         questions: Mapping[str, Any],
         started: float,
+        *,
+        model_field: Optional[str],
+        authorized: bool,
     ) -> JevResult:
+        """POST the System One wire format to ``{base_url}/v1/systemone``.
+
+        Shared by the ``official`` transport (always authenticated, model
+        defaults to :data:`DEFAULT_JEV_MODEL`) and ``local`` (optional auth,
+        model only sent when the caller picked one).
+        """
         import requests
 
-        payload = {
+        payload: Dict[str, Any] = {
             "state": state,
-            "model": self.model or DEFAULT_JEV_MODEL,
             "questions": dict(questions),
         }
+        if model_field:
+            payload["model"] = model_field
+        headers = {"Content-Type": "application/json"}
+        if authorized:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         delay = 1.0
         for attempt in range(self.max_retries + 1):
             try:
                 response = requests.post(
                     f"{self.base_url}/v1/systemone",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json=payload,
                     timeout=self.timeout,
                 )

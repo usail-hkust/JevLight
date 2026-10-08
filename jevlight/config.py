@@ -93,12 +93,10 @@ DATASETS: Dict[str, Dict[str, Any]] = {
             "anon_3_4_jinan_real.rou.xml",
             "anon_3_4_jinan_real_2000.rou.xml",
             "anon_3_4_jinan_real_2500.rou.xml",
-            "anon_3_4_jinan_synthetic_24000_60min.rou.xml",
-            "anon_3_4_jinan_synthetic_24h_6000.rou.xml",
+            "jinan_synthetic_24h_6000.rou.xml",
         ],
         "num_intersections": 12,
     },
-    # Drop the ChatLight dataset folders under data/ to enable these.
     "hangzhou": {
         "template": "Hangzhou",
         "road_net": "4_4",
@@ -119,6 +117,15 @@ DATASETS: Dict[str, Dict[str, Any]] = {
             "anon_28_7_newyork_real_triple.rou.xml",
         ],
         "num_intersections": 196,
+    },
+    "newyork_16x3": {
+        "template": "NewYork",
+        "road_net": "16x3",
+        "roadnet_file": "roadnet_16_3.net.xml",
+        "traffic_files": [
+            "anon_16_3_newyork_real.rou.xml",
+        ],
+        "num_intersections": 48,
     },
     "mzw": {
         "template": "MZW",

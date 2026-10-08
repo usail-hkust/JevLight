@@ -2,8 +2,12 @@
 
 Control flow mirrors ChatLight's ``run_LLMLight.py``: collect observations,
 decide one action per intersection, step SUMO, log traces and metrics.  The
-decision model is Jev — either the community MCP endpoint (default,
-``$JEV_API_KEY``) or the official TypeSafe API (``$TYPESAFE_API_KEY``).
+decision model is Jev — the community MCP endpoint (default, ``$JEV_API_KEY``),
+the official TypeSafe API (``$TYPESAFE_API_KEY``), or a local Jev-compatible
+server serving open Jev-style models (``--jev_transport local``, started via
+``scripts/serve_jev.sh``).  ``--agent`` selects the prompt and request
+pattern: ``jevlight`` (native), ``llmlight`` (per-intersection agent,
+LLMLight prompt), or ``collmlight`` (network-level agent, CoLLMLight prompt).
 See ``jevlight/controller.py`` for the question design.
 
 Examples:
@@ -17,6 +21,20 @@ Examples:
     # Official TypeSafe API:
     export TYPESAFE_API_KEY=...
     python run_jevlight.py --jev_transport official --dataset jinan --count 900
+
+    # Open Jev-style model served locally (see scripts/serve_jev.sh):
+    scripts/serve_jev.sh --model tev1          # in another shell / GPU node
+    python run_jevlight.py --jev_transport local --dataset jinan --count 900
+
+    # ChatLight baseline request patterns on the same Jev interface:
+    python run_jevlight.py --agent llmlight   # per-intersection agent
+    python run_jevlight.py --agent collmlight # network-level agent
+
+    # MaxPressure baseline, no Jev calls at all:
+    python run_jevlight.py --dry_run --count 3600
+
+    # Watch the experiment in 3D (serves viz/, opens the browser):
+    python run_jevlight.py --mock_jev --count 60 --visualize
 """
 
 from __future__ import annotations
@@ -25,9 +43,10 @@ import argparse
 import copy
 import json
 import os
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from tqdm import tqdm
 
@@ -40,14 +59,18 @@ from jevlight.config import (
     setup_dataset_config,
 )
 from jevlight.controller import (
+    AGENT_MODES,
+    AGENT_MODE_DEFAULTS,
     JEV_FALLBACKS,
     JEV_PACKAGINGS,
     JevLightController,
+    MaxPressureController,
 )
 from jevlight.env_bridge import JevLightEnv
 from jevlight.evaluation_metrics import calculate_evaluation_metrics_from_env
 from jevlight.jev_client import (
     DEFAULT_JEV_MODEL,
+    DEFAULT_LOCAL_BASE_URL,
     DEFAULT_MCP_BASE_URL,
     DEFAULT_OFFICIAL_BASE_URL,
     JEV_TRANSPORTS,
@@ -56,10 +79,22 @@ from jevlight.jev_client import (
 )
 from jevlight.observation import collect_observations
 from jevlight.rolling_evaluation import RollingMetricRecorder
+from jevlight.viz_server import (
+    DEFAULT_VIZ_HOST,
+    DEFAULT_VIZ_PORT,
+    NetworkModel,
+    PassiveRuntime,
+    open_viz_page,
+    start_viz_server,
+)
 from jevlight.wandb_utils import safe_wandb_finish, safe_wandb_log, wandb_init_if_enabled
 
 
 def parse_args():
+    packaging_defaults = ", ".join(
+        f"{mode}={defaults['packaging']}"
+        for mode, defaults in AGENT_MODE_DEFAULTS.items()
+    )
     parser = argparse.ArgumentParser(
         description="Run JevLight signal control with a Jev decision model"
     )
@@ -70,7 +105,9 @@ def parse_args():
         help=(
             "mcp: community server at www.jevai.org/api/mcp (default, uses "
             "$JEV_API_KEY); official: TypeSafe System One API (uses "
-            "$TYPESAFE_API_KEY)"
+            "$TYPESAFE_API_KEY); local: self-hosted Jev-compatible server "
+            f"({DEFAULT_LOCAL_BASE_URL} or $JEV_LOCAL_BASE_URL, no key; "
+            "start one with scripts/serve_jev.sh)"
         ),
     )
     parser.add_argument(
@@ -95,7 +132,8 @@ def parse_args():
         help=(
             "Override the endpoint URL (defaults: "
             f"{DEFAULT_MCP_BASE_URL} for mcp, "
-            f"{DEFAULT_OFFICIAL_BASE_URL} for official)"
+            f"{DEFAULT_OFFICIAL_BASE_URL} for official, "
+            f"{DEFAULT_LOCAL_BASE_URL} or $JEV_LOCAL_BASE_URL for local)"
         ),
     )
     parser.add_argument(
@@ -121,13 +159,27 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--agent",
+        choices=AGENT_MODES,
+        default="jevlight",
+        help=(
+            "Prompt and request pattern: jevlight = this repo's native "
+            "mapping (default); llmlight = LLMLight per-intersection agent "
+            "prompt, per_intersection packaging, no congestion question; "
+            "collmlight = CoLLMLight network-level agent prompt, network "
+            "packaging. Sets the defaults for --packaging and the "
+            "congestion question; explicit flags still win"
+        ),
+    )
+    parser.add_argument(
         "--packaging",
         choices=JEV_PACKAGINGS,
-        default="network",
+        default=None,
         help=(
             "network: one request per step with every active intersection as a "
-            "parallel question (default); per_intersection: one request per "
-            "active intersection per step, like LLMLight"
+            "parallel question; per_intersection: one request per active "
+            "intersection per step, like LLMLight. Default: the --agent "
+            f"mode's packaging ({packaging_defaults})"
         ),
     )
     parser.add_argument(
@@ -152,7 +204,10 @@ def parse_args():
     parser.add_argument(
         "--no_speculative",
         action="store_true",
-        help="Drop the congestion Noul question from each request",
+        help=(
+            "Drop the congestion Noul question from each request (the "
+            "llmlight agent mode never sends it)"
+        ),
     )
     parser.add_argument(
         "--max_workers",
@@ -164,6 +219,16 @@ def parse_args():
         "--mock_jev",
         action="store_true",
         help="Deterministic local answers for pipeline smoke tests (no API)",
+    )
+    parser.add_argument(
+        "--dry_run",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "MaxPressure baseline: signals chosen by local argmax-pressure "
+            "(queued + approaching vehicles per phase), no Jev requests at "
+            "all — no API key or transport needed"
+        ),
     )
     parser.add_argument("--memo", default="JevLight")
     parser.add_argument("--proj_name", default="JevLight")
@@ -195,6 +260,31 @@ def parse_args():
     )
     parser.add_argument("--hourly_interval", type=int, default=3600)
     parser.add_argument("--evaluation_output_dir", default=None)
+    parser.add_argument(
+        "--visualize",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Serve the 3D visualizer (viz/) on this run's own simulation and "
+            "open it in the browser; the page's play/pause/step buttons gate "
+            "the experiment loop"
+        ),
+    )
+    parser.add_argument(
+        "--viz_host", default=DEFAULT_VIZ_HOST, help="Visualizer bind host"
+    )
+    parser.add_argument(
+        "--viz_port",
+        type=int,
+        default=DEFAULT_VIZ_PORT,
+        help=f"Visualizer port (default {DEFAULT_VIZ_PORT}; next free port used if taken)",
+    )
+    parser.add_argument(
+        "--viz_hold",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Keep serving the final 3D state after the run until Ctrl-C",
+    )
     return parser.parse_args()
 
 
@@ -284,11 +374,24 @@ def run(args):
     if not os.path.isfile(roadnet_path):
         raise FileNotFoundError(f"Roadnet file does not exist: {roadnet_path}")
 
-    api_key = resolve_jev_api_key(args.jev_api_key)
-    if not args.mock_jev and api_key is None:
+    # The local transport must not pick a hosted key up from the
+    # environment; only an explicitly passed --jev_api_key is forwarded.
+    api_key = (
+        args.jev_api_key
+        if args.jev_transport == "local"
+        else resolve_jev_api_key(args.jev_api_key)
+    )
+    if (
+        not args.mock_jev
+        and not args.dry_run
+        and args.jev_transport != "local"
+        and api_key is None
+    ):
         raise ValueError(
             "Jev API key missing: pass --jev_api_key or set "
-            "$JEV_API_KEY / $TYPESAFE_API_KEY (or use --mock_jev)"
+            "$JEV_API_KEY / $TYPESAFE_API_KEY (or use --mock_jev, "
+            "--jev_transport local for a self-hosted server, or --dry_run "
+            "for the MaxPressure baseline)"
         )
 
     timestamp = time.strftime("%m_%d_%H_%M_%S")
@@ -298,29 +401,39 @@ def run(args):
     min_interval = args.jev_min_interval
     if min_interval is None:
         min_interval = 3.0 if args.jev_transport == "mcp" else 0.0
-    client = JevClient(
-        transport=args.jev_transport,
-        model=(
-            (args.jev_model or DEFAULT_JEV_MODEL)
-            if args.jev_transport == "official"
-            else args.jev_model
-        ),
-        api_key=api_key,
-        base_url=args.jev_base_url,
-        timeout=args.jev_timeout,
-        max_retries=args.jev_retries,
-        min_interval=min_interval,
-        mock=args.mock_jev,
-    )
-    controller = JevLightController(
-        client,
-        args.duration,
-        packaging=args.packaging,
-        fallback=args.fallback,
-        min_confidence=args.min_confidence,
-        speculative=not args.no_speculative,
-        max_workers=args.max_workers,
-    )
+    agent_defaults = AGENT_MODE_DEFAULTS[args.agent]
+    packaging = args.packaging or agent_defaults["packaging"]
+    speculative = agent_defaults["speculative"] and not args.no_speculative
+    if args.dry_run:
+        # MaxPressure baseline: purely local decisions, no Jev client at all.
+        packaging = "none"
+        controller = MaxPressureController(args.duration)
+    else:
+        client = JevClient(
+            transport=args.jev_transport,
+            model=(
+                (args.jev_model or DEFAULT_JEV_MODEL)
+                if args.jev_transport == "official"
+                else args.jev_model
+            ),
+            api_key=api_key,
+            base_url=args.jev_base_url,
+            timeout=args.jev_timeout,
+            max_retries=args.jev_retries,
+            min_interval=min_interval,
+            mock=args.mock_jev,
+        )
+        controller = JevLightController(
+            client,
+            args.duration,
+            packaging=packaging,
+            fallback=args.fallback,
+            min_confidence=args.min_confidence,
+            speculative=speculative,
+            max_workers=args.max_workers,
+            agent_mode=args.agent,
+        )
+    agent_mode = "maxpressure" if args.dry_run else args.agent
 
     simulator = JevLightEnv(
         agent_config,
@@ -331,6 +444,30 @@ def run(args):
     env = simulator.env
     if args.start_time:
         simulator.reset_env_with_start_time(args.start_time)
+
+    # 3D visualization attaches to THIS simulation (same traci connection):
+    # the control loop publishes one frame per step, and the page's
+    # play/pause/step buttons gate the loop between steps.
+    viz_runtime: Optional[PassiveRuntime] = None
+    viz_server = None
+    if args.visualize:
+        viz_network = NetworkModel.load(roadnet_path)
+        viz_conn = getattr(env, "traci_conn", None)
+        viz_runtime = PassiveRuntime(
+            step_length=(
+                float(viz_conn.simulation.getDeltaT()) if viz_conn else 1.0
+            ),
+            offset=tuple(viz_network.payload["offset"]),
+        )
+        viz_server, viz_url = start_viz_server(
+            viz_runtime,
+            viz_network.payload,
+            host=args.viz_host,
+            port=args.viz_port,
+        )
+        if viz_conn:
+            viz_runtime.publish(viz_conn)
+        open_viz_page(viz_url)
 
     logger = wandb_init_if_enabled(
         env_config,
@@ -365,9 +502,10 @@ def run(args):
             logger=logger,
             metadata={
                 "method": "jevlight",
-                "jev_transport": args.jev_transport,
-                "jev_model": args.jev_model,
-                "packaging": args.packaging,
+                "agent_mode": agent_mode,
+                "jev_transport": None if args.dry_run else args.jev_transport,
+                "jev_model": None if args.dry_run else args.jev_model,
+                "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
                 "traffic_file": args.traffic_file,
@@ -392,6 +530,8 @@ def run(args):
             unit="s",
         ) as progress:
             while not done and step < max_steps:
+                if viz_runtime is not None:
+                    viz_runtime.wait_until_running()
                 observations = collect_observations(env)
                 actions, traces = controller.decide(observations, step)
                 step_duration = args.duration
@@ -402,6 +542,8 @@ def run(args):
                     )
                 _, rewards, done, _ = env.step(actions, min_action_time=step_duration)
                 total_reward += float(sum(rewards))
+                if viz_runtime is not None:
+                    viz_runtime.publish(env.traci_conn)
                 for trace in traces:
                     trace_file.write(json.dumps(trace, ensure_ascii=False) + "\n")
                 trace_file.flush()
@@ -411,7 +553,7 @@ def run(args):
                 simulated_elapsed = current_time - evaluation_start_time
                 usage = controller.usage_summary()
                 print(
-                    f"[SUMO-TIME] controller=jevlight "
+                    f"[SUMO-TIME] controller={agent_mode} "
                     f"step={step}/{max_steps} current={current_time:.0f}s "
                     f"elapsed={simulated_elapsed:.0f}/{max_steps * args.duration}s "
                     f"requests={usage['requests']} "
@@ -440,11 +582,14 @@ def run(args):
         json.dumps(
             {
                 "run_id": run_id,
-                "jev_transport": args.jev_transport,
-                "jev_model": args.jev_model,
-                "packaging": args.packaging,
+                "agent_mode": agent_mode,
+                "jev_transport": None if args.dry_run else args.jev_transport,
+                "jev_model": None if args.dry_run else args.jev_model,
+                "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
+                "dry_run": bool(args.dry_run),
+                "visualize": bool(args.visualize),
                 **metrics,
                 "jev": controller.usage_summary(),
             },
@@ -452,6 +597,18 @@ def run(args):
         ),
         encoding="utf-8",
     )
+    if viz_runtime is not None and args.viz_hold:
+        print("[viz] holding the final 3D state — Ctrl-C to exit", flush=True)
+        try:
+            while not viz_runtime.stop_event.is_set():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+    if viz_runtime is not None:
+        viz_runtime.close()
+    if viz_server is not None:
+        viz_server.shutdown()
+        viz_server.server_close()
     env.batch_log()
     env.end_engine()
     print(json.dumps(metrics, indent=2))
