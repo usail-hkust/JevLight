@@ -18,6 +18,18 @@ const state = {
   camMode: false,
 };
 
+// Surface any runtime error on the page itself — a hidden failure is a
+// blue sky and zero readouts, with no clue about what broke.
+function showBanner(text) {
+  const banner = document.getElementById("banner");
+  banner.style.display = "";
+  banner.textContent = text;
+}
+window.addEventListener("error", (event) => showBanner(`error: ${event.message}`));
+window.addEventListener("unhandledrejection", (event) =>
+  showBanner(`error: ${event.reason}`),
+);
+
 // --------------------------------------------------------------------- //
 // Renderer, scene, lighting
 // --------------------------------------------------------------------- //
@@ -315,10 +327,7 @@ function connectStream() {
     updateTrafficLights(frame.tls);
     updateHud(frame);
   });
-  source.onerror = () => {
-    el("banner").style.display = "";
-    el("banner").textContent = "connection lost — retrying…";
-  };
+  source.onerror = () => showBanner("connection lost — retrying…");
   source.onopen = () => {
     el("banner").style.display = "none";
   };
@@ -328,14 +337,14 @@ async function boot() {
   const response = await fetch("/api/network");
   if (!response.ok) throw new Error(`/api/network ${response.status}`);
   state.net = await response.json();
-  document.getElementById("banner").textContent = "building the city…";
+  showBanner("building the city…");
   await new Promise((resolve) => setTimeout(resolve)); // let the banner paint
   buildNetwork(state.net);
   connectStream();
 }
 
 boot().catch((err) => {
-  el("banner").textContent = `failed to start: ${err}`;
+  showBanner(`failed to start: ${err}`);
   console.error(err);
 });
 

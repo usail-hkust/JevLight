@@ -93,6 +93,16 @@ function hash01(a, b, c = 0) {
   return ((h >>> 0) % 100000) / 100000;
 }
 
+/** Merge geometries that may mix indexed and non-indexed sources
+ *  (e.g. CylinderGeometry + IcosahedronGeometry): mergeGeometries
+ *  returns null on mismatched index usage, so normalize first. */
+export function mergeCompatible(parts) {
+  const normalized = parts.map((part) => (part.index ? part.toNonIndexed() : part));
+  const merged = mergeGeometries(normalized, false);
+  normalized.forEach((geometry) => geometry.dispose());
+  return merged;
+}
+
 function pointSegmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -289,7 +299,7 @@ function treeGeometry() {
     paintVertices(blob, 0xffffff); // tinted per instance
     parts.push(blob);
   }
-  return mergeGeometries(parts, false);
+  return mergeCompatible(parts);
 }
 
 function paintVertices(geometry, hex) {
