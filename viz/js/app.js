@@ -76,7 +76,7 @@ let tlsMeshes = new Map();
 let trafficCam = null;
 let homeCamera = null;
 
-function fitLightsAndCamera(bounds) {
+function fitLightsAndCamera(bounds, tlsList) {
   const { min, max } = bounds;
   const cx = (min[0] + max[0]) / 2;
   const cz = (min[1] + max[1]) / 2;
@@ -96,12 +96,18 @@ function fitLightsAndCamera(bounds) {
   shadow.far = distance * 2.4;
   shadow.updateProjectionMatrix();
 
-  camera.position.set(
-    cx + distance * 0.32,
-    distance * 0.78,
-    cz + distance * 0.72,
-  );
-  controls.target.set(cx, 0, cz);
+  // Start close above the most central junction, not in a far overview.
+  let anchor = { x: cx, y: cz };
+  let bestDistance = Infinity;
+  for (const tls of tlsList || []) {
+    const d = Math.hypot(tls.x - cx, tls.y - cz);
+    if (d < bestDistance) {
+      bestDistance = d;
+      anchor = tls;
+    }
+  }
+  camera.position.set(anchor.x + span * 0.055, span * 0.052, anchor.y + span * 0.1);
+  controls.target.set(anchor.x, 0, anchor.y);
   controls.update();
   homeCamera = { position: camera.position.clone(), target: controls.target.clone() };
 }
@@ -140,7 +146,7 @@ function buildNetwork(net) {
   trafficCam = new TrafficCam(scene, net);
   buildTlsChips(net.tls);
   buildCamList(net.tls);
-  fitLightsAndCamera(net.bounds);
+  fitLightsAndCamera(net.bounds, net.tls);
   onResize();
   document.getElementById("banner").style.display = "none";
 }

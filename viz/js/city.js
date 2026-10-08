@@ -102,9 +102,24 @@ class SegmentGrid {
       for (let i = 0; i < clean.length - 1; i++) {
         const [ax, ay] = clean[i];
         const [bx, by] = clean[i + 1];
-        const key = `${Math.floor(((ax + bx) / 2) / cell)}:${Math.floor(((ay + by) / 2) / cell)}`;
-        if (!this.cells.has(key)) this.cells.set(key, []);
-        this.cells.get(key).push([ax, ay, bx, by]);
+        // Register the segment in EVERY cell it passes through: long
+        // segments span many cells, and a midpoint-only key would hide
+        // them from queries near their far ends (buildings on roads).
+        const steps = Math.max(
+          1,
+          Math.ceil(Math.hypot(bx - ax, by - ay) / (cell / 2)),
+        );
+        const keys = new Set();
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          keys.add(
+            `${Math.floor((ax + (bx - ax) * t) / cell)}:${Math.floor((ay + (by - ay) * t) / cell)}`,
+          );
+        }
+        for (const key of keys) {
+          if (!this.cells.has(key)) this.cells.set(key, []);
+          this.cells.get(key).push([ax, ay, bx, by]);
+        }
       }
     }
   }

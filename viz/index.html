@@ -74,7 +74,10 @@
     }
     .campanel {
       position: relative; border: 1px solid var(--line); border-radius: 8px;
-      overflow: hidden; background: #05070a; aspect-ratio: 16 / 9;
+      overflow: hidden;
+      /* transparent: the WebGL sub-view renders on the canvas underneath */
+      background: transparent;
+      aspect-ratio: 16 / 9;
     }
     .campanel .tag {
       position: absolute; top: 6px; left: 8px; background: rgba(5, 7, 10, 0.75);
