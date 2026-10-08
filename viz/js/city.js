@@ -1,8 +1,16 @@
-// City scene: sidewalks, asphalt lanes, road markings, zebra crossings and
-// procedural street buildings, all derived from the SUMO network payload.
+// City scene: textured sidewalks and asphalt, road markings, zebra
+// crossings, procedural buildings with lit-window facades, street trees
+// and park clusters — all derived from the SUMO network payload.
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import {
+  asphaltTexture,
+  facadeTextures,
+  grassTexture,
+  roofTexture,
+  sidewalkTexture,
+} from "/js/textures.js";
 
 const LANE_Y = 0.04; // asphalt sits just above the sidewalk ribbon
 const MARK_Y = 0.06; // markings above asphalt
@@ -24,14 +32,17 @@ function cleanPolyline(points, epsilon = 0.05) {
 }
 
 /**
- * A flat horizontal ribbon (triangle strip) along a 2D polyline.
- * Returns positions only; caller supplies y and material color.
+ * A flat horizontal ribbon (triangle strip) along a 2D polyline, with UVs
+ * (u across the width, v in ~10 m tiles along the length) for textures.
  */
-function ribbonPositions(points, width, y) {
+function ribbonGeometry(points, width, y) {
   const clean = cleanPolyline(points);
   if (clean.length < 2) return null;
   const half = width / 2;
   const positions = [];
+  const uvs = [];
+  const indices = [];
+  let distance = 0;
   for (let i = 0; i < clean.length; i++) {
     const p = clean[i];
     const a = clean[Math.max(0, i - 1)];
@@ -44,23 +55,22 @@ function ribbonPositions(points, width, y) {
     const nx = -dy * half;
     const ny = dx * half;
     positions.push(p[0] + nx, y, p[1] + ny, p[0] - nx, y, p[1] - ny);
-  }
-  return { clean, positions };
-}
-
-function ribbonGeometry(points, width, y) {
-  const ribbon = ribbonPositions(points, width, y);
-  if (!ribbon) return null;
-  const indices = [];
-  for (let i = 1; i < ribbon.clean.length; i++) {
-    const base = (i - 1) * 2;
-    indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    uvs.push(0, distance / 10, 1, distance / 10);
+    if (i > 0) {
+      const base = (i - 1) * 2;
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      distance += Math.hypot(
+        clean[i][0] - clean[i - 1][0],
+        clean[i][1] - clean[i - 1][1],
+      );
+    }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
-    new THREE.Float32BufferAttribute(ribbon.positions, 3),
+    new THREE.Float32BufferAttribute(positions, 3),
   );
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
@@ -83,14 +93,15 @@ function hash01(a, b, c = 0) {
   return ((h >>> 0) % 100000) / 100000;
 }
 
-// --------------------------------------------------------------------- //
-// Buildings
-// --------------------------------------------------------------------- //
-
-const BUILDING_PALETTE = [
-  0xb8b2a7, 0xa89f93, 0xc4bdb2, 0x9b8f82, 0xb0a396, 0x8f867c, 0xcac2b5,
-  0xa39890,
-];
+function pointSegmentDistance(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared
+    ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared))
+    : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
 
 /** Grid index over lane segments for fast point-to-road distance checks. */
 class SegmentGrid {
@@ -124,8 +135,7 @@ class SegmentGrid {
     }
   }
 
-  /** Distance from (x,y) to the nearest lane segment (checked with a ring
-   *  radius in grid cells, so short probe radii stay cheap). */
+  /** Distance from (x,y) to the nearest lane segment. */
   distanceToRoad(x, y, maxRadius) {
     const cell = this.cell;
     const cx = Math.floor(x / cell);
@@ -146,27 +156,16 @@ class SegmentGrid {
   }
 }
 
-function pointSegmentDistance(px, py, ax, ay, bx, by) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const lengthSquared = dx * dx + dy * dy;
-  const t = lengthSquared
-    ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared))
-    : 0;
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-}
+// --------------------------------------------------------------------- //
+// Buildings: facades with lit windows, gravel roofs
+// --------------------------------------------------------------------- //
 
-/**
- * Street-wall buildings along both sides of every road.  Candidate lots
- * are pushed sideways off the sampled lane, then VALIDATED against the
- * real distance to every lane segment (divided carriageways, wide roads
- * and nearby parallel streets are all handled by the same check): a lot
- * must clear the full road corridor plus its own half-depth, or it is
- * dropped.  Junction corners stay open.
- */
-function buildBuildings(net) {
+const BUILDING_PALETTE = [
+  0xffffff, 0xf2ece2, 0xe8ded2, 0xd9cfc2, 0xcfc6ba, 0xe5ded4, 0xd8cfc6,
+];
+
+function buildBuildings(net, grid) {
   const junctions = net.tls.map((tls) => [tls.x, tls.y]);
-  const grid = new SegmentGrid(net);
   const lots = [];
   const taken = new Set();
 
@@ -199,9 +198,6 @@ function buildBuildings(net) {
           const r3 = hash01(px | 0, py | 0, 3 + (side > 0 ? 8 : 0));
           const depth = 10 + r2 * 8;
           const width = 12 + r2 * 8;
-          // Push the lot out until it clears every road by margin + its
-          // own half-depth (the opposite carriageway is a lane too, so
-          // divided roads push buildings past the whole corridor).
           let placed = null;
           for (let offset = 12 + depth / 2; offset < 60 + depth / 2; offset += 10) {
             const cx = px + nx * offset;
@@ -229,11 +225,25 @@ function buildBuildings(net) {
     }
   }
 
+  // Facade on the sides (+x, -x, +z, -z), gravel on the top (+y).
+  const { map, emissiveMap } = facadeTextures();
+  const sideMaterial = new THREE.MeshStandardMaterial({
+    map,
+    emissiveMap,
+    emissive: 0xffb765,
+    emissiveIntensity: 0.55,
+    roughness: 0.85,
+    metalness: 0.03,
+  });
+  const roofMaterial = new THREE.MeshStandardMaterial({
+    map: roofTexture(),
+    roughness: 1,
+  });
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   geometry.translate(0, 0.5, 0); // grow from the ground
   const mesh = new THREE.InstancedMesh(
     geometry,
-    new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.05 }),
+    [sideMaterial, sideMaterial, roofMaterial, roofMaterial, sideMaterial, sideMaterial],
     Math.max(lots.length, 1),
   );
   const matrix = new THREE.Matrix4();
@@ -243,6 +253,7 @@ function buildBuildings(net) {
     matrix.scale(new THREE.Vector3(lot.w, lot.h, lot.d));
     matrix.setPosition(lot.x, 0, lot.z);
     mesh.setMatrixAt(index, matrix);
+    // Facade tint (near-white palette keeps windows readable).
     mesh.setColorAt(index, color.setHex(lot.color));
   });
   mesh.count = lots.length;
@@ -251,6 +262,129 @@ function buildBuildings(net) {
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   if (mesh.count) mesh.computeBoundingSphere(); // cull against real extent
+  return mesh;
+}
+
+// --------------------------------------------------------------------- //
+// Trees: street trees on the sidewalks + park clusters
+// --------------------------------------------------------------------- //
+
+const FOLIAGE_GREENS = [0x5d7a4a, 0x4e6b3f, 0x6b8a52, 0x557244, 0x71905c];
+
+function treeGeometry() {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.16, 0.24, 2.4, 7);
+  trunk.translate(0, 1.2, 0);
+  paintVertices(trunk, 0x6b4f35);
+  parts.push(trunk);
+  const blobs = [
+    [1.7, 3.4],
+    [1.25, 4.5],
+    [0.85, 5.3],
+  ];
+  for (const [radius, y] of blobs) {
+    const blob = new THREE.IcosahedronGeometry(radius, 1);
+    blob.scale(1, 0.82, 1);
+    blob.translate(0, y, 0);
+    paintVertices(blob, 0xffffff); // tinted per instance
+    parts.push(blob);
+  }
+  return mergeGeometries(parts, false);
+}
+
+function paintVertices(geometry, hex) {
+  const count = geometry.attributes.position.count;
+  const colors = new Float32Array(count * 3);
+  const c = new THREE.Color(hex);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
+function buildTrees(net, grid) {
+  const junctions = net.tls.map((tls) => [tls.x, tls.y]);
+  const spots = [];
+
+  // Street trees: on the sidewalk strip beside each lane.
+  for (const lane of net.lanes) {
+    const clean = cleanPolyline(lane.shape);
+    if (clean.length < 2) continue;
+    const near = lane.width / 2;
+    for (let i = 0; i < clean.length - 1; i++) {
+      const [ax, ay] = clean[i];
+      const [bx, by] = clean[i + 1];
+      const segLen = Math.hypot(bx - ax, by - ay);
+      if (segLen < 40) continue;
+      const dx = (bx - ax) / segLen;
+      const dy = (by - ay) / segLen;
+      for (let side = -1; side <= 1; side += 2) {
+        const nx = -dy * side;
+        const ny = dx * side;
+        for (let s = 14; s < segLen - 14; s += 17) {
+          const px = ax + dx * s + nx * (near + 2.3);
+          const py = ay + dy * s + ny * (near + 2.3);
+          let nearJunction = false;
+          for (const [jx, jy] of junctions) {
+            if (Math.hypot(jx - px, jy - py) < 34) {
+              nearJunction = true;
+              break;
+            }
+          }
+          if (nearJunction) continue;
+          // Must sit on this sidewalk strip, clear of every other lane.
+          const d = grid.distanceToRoad(px, py, near + 6);
+          if (d < near + 1.0 || d > near + 4.5) continue;
+          spots.push([px, py]);
+        }
+      }
+    }
+  }
+
+  // Park clusters: open ground far from any road.
+  const { min, max } = net.bounds;
+  for (let gx = min[0] + 40; gx < max[0] - 40; gx += 70) {
+    for (let gy = min[1] + 40; gy < max[1] - 40; gy += 70) {
+      if (grid.distanceToRoad(gx, gy, 90) < 34) continue;
+      const count = 4 + Math.floor(hash01(gx | 0, gy | 0, 5) * 9);
+      for (let i = 0; i < count; i++) {
+        const px = gx + (hash01(gx | 0, gy | 0, 6 + i) - 0.5) * 42;
+        const py = gy + (hash01(gy | 0, gx | 0, 6 + i) - 0.5) * 42;
+        if (grid.distanceToRoad(px, py, 60) < 28) continue;
+        spots.push([px, py]);
+      }
+    }
+  }
+
+  const mesh = new THREE.InstancedMesh(
+    treeGeometry(),
+    new THREE.MeshStandardMaterial({
+      roughness: 0.95,
+      vertexColors: true,
+    }),
+    Math.max(spots.length, 1),
+  );
+  const matrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+  spots.forEach(([x, z], index) => {
+    const scale = 0.8 + hash01(x | 0, z | 0, 7) * 0.7;
+    matrix.makeRotationY(hash01(x | 0, z | 0, 8) * Math.PI * 2);
+    matrix.scale(new THREE.Vector3(scale, scale * (0.9 + hash01(x | 0, z | 0, 9) * 0.4), scale));
+    matrix.setPosition(x, 0, z);
+    mesh.setMatrixAt(index, matrix);
+    mesh.setColorAt(
+      index,
+      color.setHex(FOLIAGE_GREENS[Math.floor(hash01(x | 0, z | 0, 10) * FOLIAGE_GREENS.length)]),
+    );
+  });
+  mesh.count = spots.length;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  if (mesh.count) mesh.computeBoundingSphere();
   return mesh;
 }
 
@@ -293,8 +427,6 @@ function buildMarkings(net) {
       const len = Math.hypot(dx, dy) || 1;
       dx /= len;
       dy /= len;
-      const nx = -dy;
-      const ny = dx;
       const w = lane.width;
       // Stop bar across the lane, 1 m before the junction end.
       const sx = ex - dx * 1.2;
@@ -326,31 +458,32 @@ function buildMarkings(net) {
 // --------------------------------------------------------------------- //
 
 /** Build the whole static city: ground, sidewalks, roads, markings,
- *  buildings. Returns the THREE.Group plus network bounds info. */
+ *  buildings and trees. Returns the THREE.Group. */
 export function buildCity(net) {
   const group = new THREE.Group();
+  const grid = new SegmentGrid(net);
   const { min, max } = net.bounds;
   const cx = (min[0] + max[0]) / 2;
   const cz = (min[1] + max[1]) / 2;
   const span = Math.max(max[0] - min[0], max[1] - min[1]) * 1.6;
 
-  // Ground: park-like base under the whole district.
+  // Ground: mottled grass across the whole district.
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(span, span),
-    new THREE.MeshStandardMaterial({ color: 0x3d4a3a, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(cx, -0.35, cz);
   ground.receiveShadow = true;
   group.add(ground);
 
-  // Sidewalk ribbon under every lane (wider, concrete), then asphalt.
+  // Textured sidewalk under every lane (wider, concrete), then asphalt.
   const sidewalkMaterial = new THREE.MeshStandardMaterial({
-    color: 0x9a978f,
+    map: sidewalkTexture(),
     roughness: 0.95,
   });
   const asphaltMaterial = new THREE.MeshStandardMaterial({
-    color: 0x33363c,
+    map: asphaltTexture(),
     roughness: 0.92,
   });
   for (const lane of net.lanes) {
@@ -370,6 +503,7 @@ export function buildCity(net) {
 
   const markings = buildMarkings(net);
   if (markings) group.add(markings);
-  group.add(buildBuildings(net));
+  group.add(buildBuildings(net, grid));
+  group.add(buildTrees(net, grid));
   return group;
 }

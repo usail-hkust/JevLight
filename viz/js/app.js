@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { buildCity } from "/js/city.js";
+import { buildSignals } from "/js/signals.js";
 import { Fleet } from "/js/vehicles.js";
 import { TrafficCam } from "/js/traffic_cam.js";
 
@@ -68,11 +69,11 @@ function onResize() {
 }
 
 // --------------------------------------------------------------------- //
-// City + fleet
+// City, signals, fleet
 // --------------------------------------------------------------------- //
 
 let fleet = null;
-let tlsMeshes = new Map();
+let signals = null;
 let trafficCam = null;
 let homeCamera = null;
 
@@ -115,34 +116,7 @@ function fitLightsAndCamera(bounds, tlsList) {
 function buildNetwork(net) {
   scene.add(buildCity(net));
   fleet = new Fleet(scene);
-
-  // Traffic-light markers on poles at each junction.
-  const poleMaterial = new THREE.MeshStandardMaterial({
-    color: 0x30353d,
-    roughness: 0.6,
-  });
-  const headGeometry = new THREE.SphereGeometry(1.5, 16, 12);
-  for (const tls of net.tls) {
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.14, 0.18, 6.5, 8),
-      poleMaterial,
-    );
-    pole.position.set(tls.x, 3.25, tls.y);
-    pole.castShadow = true;
-    scene.add(pole);
-    const head = new THREE.Mesh(
-      headGeometry,
-      new THREE.MeshStandardMaterial({
-        color: 0x7d8798,
-        emissive: 0x000000,
-        roughness: 0.35,
-      }),
-    );
-    head.position.set(tls.x, 6.9, tls.y);
-    scene.add(head);
-    tlsMeshes.set(tls.id, head);
-  }
-
+  signals = buildSignals(scene, net);
   trafficCam = new TrafficCam(scene, net);
   buildTlsChips(net.tls);
   buildCamList(net.tls);
@@ -154,12 +128,6 @@ function buildNetwork(net) {
 // --------------------------------------------------------------------- //
 // Traffic lights
 // --------------------------------------------------------------------- //
-
-const TLS_MATERIAL = {
-  r: { color: 0xff5d5d, emissive: 0x7a1414 },
-  y: { color: 0xffd166, emissive: 0x7a5a14 },
-  g: { color: 0x3ddc84, emissive: 0x0f6b34 },
-};
 
 function tlsColor(state) {
   let r = 0, y = 0, g = 0;
@@ -174,14 +142,10 @@ function tlsColor(state) {
 }
 
 function updateTrafficLights(states) {
+  signals.update(states);
   for (const [id, signalState] of Object.entries(states)) {
-    const mesh = tlsMeshes.get(id);
-    if (!mesh) continue;
-    const kind = tlsColor(signalState);
-    mesh.material.color.setHex(TLS_MATERIAL[kind].color);
-    mesh.material.emissive.setHex(TLS_MATERIAL[kind].emissive);
     const chip = document.getElementById(`tls-${cssId(id)}`);
-    if (chip) chip.className = `tls ${kind}`;
+    if (chip) chip.className = `tls ${tlsColor(signalState)}`;
   }
 }
 
