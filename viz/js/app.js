@@ -45,6 +45,10 @@ const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI / 2.05; // keep the camera above ground
+controls.minDistance = 15; // street level: cars stay visible when zoomed in
+controls.maxDistance = 12000;
+
+renderer.setClearColor(0x9db8d8); // any manual clear matches the sky
 
 scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x4a4438, 0.75));
 const sun = new THREE.DirectionalLight(0xfff1dd, 1.6);

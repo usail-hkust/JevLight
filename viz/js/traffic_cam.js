@@ -135,21 +135,21 @@ export class TrafficCam {
     return this.setJunction(pick.id);
   }
 
-  /** Mount each sub-camera on a 9 m pole set back from the junction center,
-   *  looking down its approach road. */
+  /** Mount each sub-camera on a 12 m pole set back from the junction
+   *  center, looking down through the junction along its approach road. */
   _placeCamera(camera, approach) {
     const { x, y } = this.junction;
-    const back = 12;
-    const height = 9;
+    const back = 20;
+    const height = 12;
     camera.position.set(
       x - approach.dx * back,
       height,
       y - approach.dy * back,
     );
     camera.lookAt(
-      x + approach.dx * 90,
-      height * 0.35,
-      y + approach.dy * 90,
+      x + approach.dx * 110,
+      1.5,
+      y + approach.dy * 110,
     );
   }
 

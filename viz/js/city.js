@@ -92,57 +92,119 @@ const BUILDING_PALETTE = [
   0xa39890,
 ];
 
+/** Grid index over lane segments for fast point-to-road distance checks. */
+class SegmentGrid {
+  constructor(net, cell = 40) {
+    this.cell = cell;
+    this.cells = new Map();
+    for (const lane of net.lanes) {
+      const clean = cleanPolyline(lane.shape);
+      for (let i = 0; i < clean.length - 1; i++) {
+        const [ax, ay] = clean[i];
+        const [bx, by] = clean[i + 1];
+        const key = `${Math.floor(((ax + bx) / 2) / cell)}:${Math.floor(((ay + by) / 2) / cell)}`;
+        if (!this.cells.has(key)) this.cells.set(key, []);
+        this.cells.get(key).push([ax, ay, bx, by]);
+      }
+    }
+  }
+
+  /** Distance from (x,y) to the nearest lane segment (checked with a ring
+   *  radius in grid cells, so short probe radii stay cheap). */
+  distanceToRoad(x, y, maxRadius) {
+    const cell = this.cell;
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    const rings = Math.ceil(maxRadius / cell) + 1;
+    let best = Infinity;
+    for (let rx = -rings; rx <= rings; rx++) {
+      for (let ry = -rings; ry <= rings; ry++) {
+        const bucket = this.cells.get(`${cx + rx}:${cy + ry}`);
+        if (!bucket) continue;
+        for (const [ax, ay, bx, by] of bucket) {
+          best = Math.min(best, pointSegmentDistance(x, y, ax, ay, bx, by));
+          if (best < 1) return best; // close enough for any clearance test
+        }
+      }
+    }
+    return best;
+  }
+}
+
+function pointSegmentDistance(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared
+    ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared))
+    : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
 /**
- * Street-wall buildings: rows of boxes placed along both sides of every
- * road, set back behind the sidewalk, with seeded heights and colors.
- * Skipped near junctions so corners stay open.
+ * Street-wall buildings along both sides of every road.  Candidate lots
+ * are pushed sideways off the sampled lane, then VALIDATED against the
+ * real distance to every lane segment (divided carriageways, wide roads
+ * and nearby parallel streets are all handled by the same check): a lot
+ * must clear the full road corridor plus its own half-depth, or it is
+ * dropped.  Junction corners stay open.
  */
 function buildBuildings(net) {
   const junctions = net.tls.map((tls) => [tls.x, tls.y]);
+  const grid = new SegmentGrid(net);
   const lots = [];
+  const taken = new Set();
+
   for (const lane of net.lanes) {
     const clean = cleanPolyline(lane.shape);
     if (clean.length < 2) continue;
-    const setback = lane.width / 2 + 4 + 7; // curb + sidewalk + front yard
     for (let side = -1; side <= 1; side += 2) {
       for (let i = 0; i < clean.length - 1; i++) {
         const [ax, ay] = clean[i];
         const [bx, by] = clean[i + 1];
         const segLen = Math.hypot(bx - ax, by - ay);
-        if (segLen < 30) continue; // too close to a junction to build
-        let dx = (bx - ax) / segLen;
-        let dy = (by - ay) / segLen;
+        if (segLen < 40) continue; // junction-adjacent: keep corners open
+        const dx = (bx - ax) / segLen;
+        const dy = (by - ay) / segLen;
         const nx = -dy * side;
         const ny = dx * side;
-        for (let s = 16; s < segLen - 16; s += 26) {
+        for (let s = 20; s < segLen - 20; s += 30) {
           const px = ax + dx * s;
           const py = ay + dy * s;
-          // Skip lots close to any junction (open street corners).
           let nearJunction = false;
           for (const [jx, jy] of junctions) {
-            if (Math.hypot(jx - px, jy - py) < 34) {
+            if (Math.hypot(jx - px, jy - py) < 40) {
               nearJunction = true;
               break;
             }
           }
           if (nearJunction) continue;
-          const r1 = hash01(px | 0, py | 0, 1);
-          const r2 = hash01(px | 0, py | 0, 2);
-          const r3 = hash01(px | 0, py | 0, 3);
-          const depth = 14 + r2 * 12;
-          const center = [
-            px + nx * (setback + depth / 2),
-            py + ny * (setback + depth / 2),
-          ];
-          // Skip duplicated lots on opposite sides of adjacent roads.
-          const key = `${Math.round(center[0] / 12)}:${Math.round(center[1] / 12)}:${side > 0 ? 1 : 0}`;
-          if (lots.some((lot) => lot.key === key)) continue;
-          const floors = 2 + Math.floor(r1 * 5) + (r3 > 0.93 ? 6 : 0);
+          const r1 = hash01(px | 0, py | 0, 1 + (side > 0 ? 8 : 0));
+          const r2 = hash01(px | 0, py | 0, 2 + (side > 0 ? 8 : 0));
+          const r3 = hash01(px | 0, py | 0, 3 + (side > 0 ? 8 : 0));
+          const depth = 10 + r2 * 8;
+          const width = 12 + r2 * 8;
+          // Push the lot out until it clears every road by margin + its
+          // own half-depth (the opposite carriageway is a lane too, so
+          // divided roads push buildings past the whole corridor).
+          let placed = null;
+          for (let offset = 12 + depth / 2; offset < 60 + depth / 2; offset += 10) {
+            const cx = px + nx * offset;
+            const cy = py + ny * offset;
+            if (grid.distanceToRoad(cx, cy, offset + 40) > 9 + depth / 2) {
+              placed = [cx, cy];
+              break;
+            }
+          }
+          if (!placed) continue;
+          const key = `${Math.round(placed[0] / 16)}:${Math.round(placed[1] / 16)}`;
+          if (taken.has(key)) continue;
+          taken.add(key);
+          const floors = 2 + Math.floor(r1 * 5) + (r3 > 0.94 ? 7 : 0);
           lots.push({
-            key,
-            x: center[0],
-            z: center[1],
-            w: 18 + r2 * 10,
+            x: placed[0],
+            z: placed[1],
+            w: width,
             d: depth,
             h: floors * 3.2 + 1.5,
             color: BUILDING_PALETTE[Math.floor(r3 * BUILDING_PALETTE.length)],
@@ -173,6 +235,7 @@ function buildBuildings(net) {
   mesh.receiveShadow = true;
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  if (mesh.count) mesh.computeBoundingSphere(); // cull against real extent
   return mesh;
 }
 

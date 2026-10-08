@@ -88,6 +88,10 @@ export class Fleet {
         mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         mesh.count = 0;
         mesh.castShadow = true;
+        // The instance bounding sphere is cached from the first (empty)
+        // frame and never recomputed as cars spawn — frustum culling
+        // would drop the whole fleet. The fleet is 3 draw calls; skip it.
+        mesh.frustumCulled = false;
         scene.add(mesh);
         return mesh;
       },
