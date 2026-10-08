@@ -111,6 +111,14 @@ class TestNetworkModel:
             assert -1e6 < x < 1e6 and -1e6 < y < 1e6
         tls_ids = {entry["id"] for entry in payload["tls"]}
         assert len(tls_ids) == 12
+        # Per-tls incoming-lane -> signal-link index map for exact head
+        # coloring in the frontend.
+        for entry in payload["tls"]:
+            links = entry["lane_links"]
+            assert isinstance(links, dict) and links
+            for lane_id, indices in links.items():
+                assert isinstance(lane_id, str)
+                assert indices and all(isinstance(i, int) for i in indices)
 
 
 class TestVehicleClassMapping:

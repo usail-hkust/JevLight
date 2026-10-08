@@ -58,7 +58,10 @@ function ribbonGeometry(points, width, y) {
     uvs.push(0, distance / 10, 1, distance / 10);
     if (i > 0) {
       const base = (i - 1) * 2;
-      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      // (L0, L1, R0) + (R0, L1, R1): upward normals (front side visible
+      // from above); the previous order produced downward normals and
+      // every road ribbon was back-face culled.
+      indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
       distance += Math.hypot(
         clean[i][0] - clean[i - 1][0],
         clean[i][1] - clean[i - 1][1],
@@ -488,13 +491,19 @@ export function buildCity(net) {
   group.add(ground);
 
   // Textured sidewalk under every lane (wider, concrete), then asphalt.
+  // DoubleSide + tinted base color: even if a texture fails to load, the
+  // road corridor still reads as solid strips on the grass.
   const sidewalkMaterial = new THREE.MeshStandardMaterial({
     map: sidewalkTexture(),
+    color: 0xa8a49c,
     roughness: 0.95,
+    side: THREE.DoubleSide,
   });
   const asphaltMaterial = new THREE.MeshStandardMaterial({
     map: asphaltTexture(),
+    color: 0x585d66,
     roughness: 0.92,
+    side: THREE.DoubleSide,
   });
   for (const lane of net.lanes) {
     const sidewalk = ribbonGeometry(lane.shape, lane.width + 5.0, 0.02);

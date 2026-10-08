@@ -130,10 +130,18 @@ class NetworkModel:
                 x, y = net.getNode(tls_id).getCoord()
             except Exception:
                 continue
+            # Incoming-lane -> signal-link indices, so the frontend can
+            # color each approach head by the exact chars of its own lane
+            # in the live SUMO state string.
+            lane_links: Dict[str, List[int]] = {}
+            for connection in tls.getConnections():
+                lane_in, _lane_out, link_index = connection[0], connection[1], connection[2]
+                lane_links.setdefault(str(lane_in.getID()), []).append(int(link_index))
             traffic_lights.append({
                 "id": tls_id,
                 "x": round(float(x), 2),
                 "y": round(float(y), 2),
+                "lane_links": lane_links,
             })
         (min_x, min_y), (max_x, max_y) = net.getBBoxXY()
         return cls({

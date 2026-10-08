@@ -1,7 +1,9 @@
-// Traffic signals: realistic mast poles with three-lamp heads facing each
-// approach.  Junctions switch lamps by their live SUMO state (majority
-// color).  Large networks fall back to one compact head per junction to
-// keep the draw-call count sane.
+// Traffic signals: mast poles with three-lamp heads, one per approach.
+// Each head is colored from the EXACT characters of the live SUMO state
+// string that belong to its approach's incoming lane (via the network's
+// lane -> signal-link map); without a link map, heads fall back to equal
+// chunks of the state string.  Large networks get one compact head per
+// junction to keep the draw-call count sane.
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
@@ -20,8 +22,23 @@ const HOUSING = new THREE.MeshStandardMaterial({
   roughness: 0.6,
 });
 
+function majorityKind(state, indices) {
+  if (indices && indices.length) {
+    let r = 0, y = 0, g = 0;
+    for (const index of indices) {
+      const ch = state[index];
+      if (ch === "r" || ch === "o") r++;
+      else if (ch === "y") y++;
+      else if (ch === "G" || ch === "g") g++;
+    }
+    if (r + y + g === 0) return "r";
+    return r >= y && r >= g ? "r" : y >= g ? "y" : "g";
+  }
+  return null;
+}
+
 /** One mast with an arm reaching over the approach + a 3-lamp housing.
- *  Returns { mast (merged geometry), lampOffsets: [r,y,g] world offsets }. */
+ *  Returns { mast (merged geometry), lampPositions: [r,y,g] world spots }. */
 function headGeometry(junction, approach) {
   const dir = new THREE.Vector3(approach.dx, 0, approach.dy); // outward
   const perp = new THREE.Vector3(-dir.z, 0, dir.x);
@@ -49,34 +66,48 @@ function headGeometry(junction, approach) {
   parts.forEach((part) => part.dispose());
 
   // Lamps stacked red over yellow over green, facing the oncoming traffic.
-  const lampOffsets = ["r", "y", "g"].map((_, index) => {
-    const offset = headCenter
+  const lampPositions = [0, 1, 2].map((index) =>
+    headCenter
       .clone()
       .addScaledVector(dir, -0.28)
-      .setY(6.15 - index * 0.55);
-    return offset;
+      .setY(6.15 - index * 0.55),
+  );
+  return { mast, lampPositions };
+}
+
+function lampMaterial(kind) {
+  return new THREE.MeshStandardMaterial({
+    color: kind === "r" ? 0x5a1512 : kind === "y" ? 0x5a4512 : 0x11402a,
+    emissive: kind === "r" ? 0xff2a1e : kind === "y" ? 0xffb020 : 0x2aff6a,
+    emissiveIntensity: 0.04,
+    roughness: 0.35,
   });
-  return { mast, lampOffsets };
 }
 
 export function buildSignals(scene, net) {
   const detailed = net.tls.length <= DETAILED_MAX_JUNCTIONS;
-  const controllers = []; // [{ set(kind) }]
+  const controllers = []; // [{ id, heads: [{ lamps, indices }] }]
 
   for (const junction of net.tls) {
     const approaches = junctionApproaches(net, junction);
-    const lampParts = { r: [], y: [], g: [] };
+    const laneLinks = junction.lane_links || {};
+    const heads = [];
     const masts = [];
+
     if (detailed) {
       for (const approach of approaches) {
-        const { mast, lampOffsets } = headGeometry(junction, approach);
+        const { mast, lampPositions } = headGeometry(junction, approach);
         masts.push(mast);
+        const lamps = {};
         ["r", "y", "g"].forEach((kind, index) => {
-          const lamp = LAMP_GEO.clone();
-          const offset = lampOffsets[index];
-          lamp.translate(offset.x, offset.y, offset.z);
-          lampParts[kind].push(lamp);
+          const lamp = new THREE.Mesh(LAMP_GEO, lampMaterial(kind));
+          const position = lampPositions[index];
+          lamp.position.copy(position);
+          lamp.castShadow = true;
+          scene.add(lamp);
+          lamps[kind] = lamp;
         });
+        heads.push({ lamps, indices: laneLinks[approach.lane] || null });
       }
     } else {
       // Compact fallback: one pole + housing per junction.
@@ -86,55 +117,53 @@ export function buildSignals(scene, net) {
       const housing = new THREE.BoxGeometry(0.62, 1.7, 0.42);
       housing.translate(junction.x, 5.6, junction.y);
       masts.push(housing);
+      const lamps = {};
       ["r", "y", "g"].forEach((kind, index) => {
-        const lamp = LAMP_GEO.clone();
-        lamp.translate(junction.x, 6.15 - index * 0.55, junction.y);
-        lampParts[kind].push(lamp);
+        const lamp = new THREE.Mesh(LAMP_GEO, lampMaterial(kind));
+        lamp.position.set(junction.x, 6.15 - index * 0.55, junction.y);
+        scene.add(lamp);
+        lamps[kind] = lamp;
       });
+      heads.push({ lamps, indices: null });
     }
 
     scene.add(new THREE.Mesh(mergeGeometries(masts, false), METAL));
-
-    const lamps = {};
-    for (const kind of ["r", "y", "g"]) {
-      const material = new THREE.MeshStandardMaterial({
-        color: kind === "r" ? 0x5a1512 : kind === "y" ? 0x5a4512 : 0x11402a,
-        emissive: kind === "r" ? 0xff2a1e : kind === "y" ? 0xffb020 : 0x2aff6a,
-        emissiveIntensity: 0.04,
-        roughness: 0.35,
-      });
-      const merged = mergeGeometries(lampParts[kind], false);
-      lampParts[kind].forEach((part) => part.dispose());
-      const mesh = new THREE.Mesh(merged, material);
-      scene.add(mesh);
-      lamps[kind] = { material, mesh };
-    }
-
-    controllers.push({
-      junctionId: junction.id,
-      set(kind) {
-        for (const key of ["r", "y", "g"]) {
-          lamps[key].material.emissiveIntensity = key === kind ? 1.6 : 0.04;
-        }
-      },
-    });
+    controllers.push({ id: junction.id, heads, approachCount: heads.length });
   }
 
-  const byId = new Map(controllers.map((c) => [c.junctionId, c]));
+  const byId = new Map(controllers.map((c) => [c.id, c]));
   return {
-    /** Apply live SUMO states: majority color per junction. */
+    /** Apply live SUMO states; each head follows its own approach's links. */
     update(states) {
       for (const [id, state] of Object.entries(states)) {
         const controller = byId.get(id);
         if (!controller) continue;
-        let r = 0, y = 0, g = 0;
-        for (const ch of state) {
-          if (ch === "r" || ch === "o") r++;
-          else if (ch === "y") y++;
-          else if (ch === "G" || ch === "g") g++;
-        }
-        controller.set(r >= y && r >= g ? "r" : y >= g ? "y" : "g");
+        controller.heads.forEach((head, headIndex) => {
+          let kind = majorityKind(state, head.indices);
+          if (!kind) {
+            // No link map for this approach: approximate with an equal
+            // chunk of the state string so heads still switch over time.
+            const size = Math.ceil(state.length / controller.approachCount);
+            const chunk = state.slice(headIndex * size, (headIndex + 1) * size);
+            kind = chunkMajority(chunk);
+          }
+          for (const key of ["r", "y", "g"]) {
+            head.lamps[key].material.emissiveIntensity =
+              key === kind ? 1.6 : 0.04;
+          }
+        });
       }
     },
   };
+}
+
+function chunkMajority(chunk) {
+  let r = 0, y = 0, g = 0;
+  for (const ch of chunk) {
+    if (ch === "r" || ch === "o") r++;
+    else if (ch === "y") y++;
+    else if (ch === "G" || ch === "g") g++;
+  }
+  if (r + y + g === 0) return "r";
+  return r >= y && r >= g ? "r" : y >= g ? "y" : "g";
 }
