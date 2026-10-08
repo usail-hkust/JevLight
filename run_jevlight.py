@@ -6,8 +6,8 @@ decision model is Jev — the community MCP endpoint (default, ``$JEV_API_KEY``)
 the official TypeSafe API (``$TYPESAFE_API_KEY``), or a local Jev-compatible
 server serving open Jev-style models (``--jev_transport local``, started via
 ``scripts/serve_jev.sh``).  ``--agent`` selects the prompt and request
-pattern: ``jevlight`` (native), ``llmlight`` (per-intersection agent,
-LLMLight prompt), or ``collmlight`` (network-level agent, CoLLMLight prompt).
+pattern: ``jevlight`` (per-intersection agent, LLMLight prompt) or
+``cojevlight`` (network-level agent, CoLLMLight prompt, default).
 See ``jevlight/controller.py`` for the question design.
 
 Examples:
@@ -27,8 +27,8 @@ Examples:
     python run_jevlight.py --jev_transport local --dataset jinan --count 900
 
     # ChatLight baseline request patterns on the same Jev interface:
-    python run_jevlight.py --agent llmlight   # per-intersection agent
-    python run_jevlight.py --agent collmlight # network-level agent
+    python run_jevlight.py --agent jevlight   # per-intersection agent
+    python run_jevlight.py --agent cojevlight # network-level agent (default)
 
     # MaxPressure baseline, no Jev calls at all:
     python run_jevlight.py --dry_run --count 3600
@@ -60,6 +60,7 @@ from jevlight.config import (
 )
 from jevlight.controller import (
     AGENT_MODES,
+    AGENT_MODE_ALIASES,
     AGENT_MODE_DEFAULTS,
     JEV_FALLBACKS,
     JEV_PACKAGINGS,
@@ -160,15 +161,16 @@ def parse_args():
     )
     parser.add_argument(
         "--agent",
-        choices=AGENT_MODES,
-        default="jevlight",
+        choices=AGENT_MODES + tuple(AGENT_MODE_ALIASES),
+        default="cojevlight",
         help=(
-            "Prompt and request pattern: jevlight = this repo's native "
-            "mapping (default); llmlight = LLMLight per-intersection agent "
-            "prompt, per_intersection packaging, no congestion question; "
-            "collmlight = CoLLMLight network-level agent prompt, network "
-            "packaging. Sets the defaults for --packaging and the "
-            "congestion question; explicit flags still win"
+            "Prompt and request pattern: jevlight = JevLight "
+            "per-intersection agent prompt, per_intersection packaging, no "
+            "congestion question; cojevlight = CoJevLight network-level "
+            "agent prompt, network packaging (default). llmlight and "
+            "collmlight are accepted as aliases. Sets the defaults for "
+            "--packaging and the congestion question; explicit flags still "
+            "win"
         ),
     )
     parser.add_argument(
@@ -206,7 +208,7 @@ def parse_args():
         action="store_true",
         help=(
             "Drop the congestion Noul question from each request (the "
-            "llmlight agent mode never sends it)"
+            "jevlight agent mode never sends it)"
         ),
     )
     parser.add_argument(
@@ -401,6 +403,7 @@ def run(args):
     min_interval = args.jev_min_interval
     if min_interval is None:
         min_interval = 3.0 if args.jev_transport == "mcp" else 0.0
+    args.agent = AGENT_MODE_ALIASES.get(args.agent, args.agent)
     agent_defaults = AGENT_MODE_DEFAULTS[args.agent]
     packaging = args.packaging or agent_defaults["packaging"]
     speculative = agent_defaults["speculative"] and not args.no_speculative

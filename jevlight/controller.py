@@ -40,20 +40,21 @@ from jevlight.observation import (
 
 JEV_PACKAGINGS = ("network", "per_intersection")
 JEV_FALLBACKS = ("previous", "ranking")
-# Agent modes: ``jevlight`` is this repo's native mapping; ``llmlight`` and
-# ``collmlight`` reproduce the request pattern and prompt wording of the two
-# migrated ChatLight baselines on the same Jev wire format.
-AGENT_MODES = ("jevlight", "llmlight", "collmlight")
+# Agent modes: ``jevlight`` is a per-intersection agent and ``cojevlight``
+# is the network-level coordinating agent — LLMLight's and CoLLMLight's
+# request patterns and prompt wording on the same Jev wire format. The
+# pre-release names ``llmlight`` / ``collmlight`` stay accepted as aliases.
+AGENT_MODES = ("jevlight", "cojevlight")
+AGENT_MODE_ALIASES = {"llmlight": "jevlight", "collmlight": "cojevlight"}
 PHASE_QUESTION_PREFIX = "phase_"
 CONGESTION_QUESTION_PREFIX = "congested_"
 
-# Packaging and speculative-question defaults per agent mode: LLMLight is a
-# per-intersection agent with no congestion judgment; CoLLMLight and JevLight
-# decide with one network-wide state per step.
+# Packaging and speculative-question defaults per agent mode: jevlight is a
+# per-intersection agent with no congestion judgment; cojevlight decides
+# with one network-wide state per step.
 AGENT_MODE_DEFAULTS = {
-    "jevlight": {"packaging": "network", "speculative": True},
-    "llmlight": {"packaging": "per_intersection", "speculative": False},
-    "collmlight": {"packaging": "network", "speculative": True},
+    "jevlight": {"packaging": "per_intersection", "speculative": False},
+    "cojevlight": {"packaging": "network", "speculative": True},
 }
 
 
@@ -134,39 +135,12 @@ def phase_criteria(
     return criteria
 
 
-def phase_question(
-    observation: IntersectionObservation,
-    phase_duration: float,
-    state_path: str,
-) -> Dict[str, Any]:
-    """The per-intersection phase Choice question in wire format."""
-    criteria = phase_criteria(observation)
-    duration = (
-        int(phase_duration) if float(phase_duration).is_integer() else phase_duration
-    )
-    instructions = (
-        f"At intersection `{state_path}`, choose the signal phase to activate "
-        f"for the next {duration} seconds "
-        "to most reduce queue pressure and vehicle waiting time. Judge each "
-        f"phase option by the lanes it serves in `{state_path}.lanes`: queued "
-        "vehicles, approaching vehicles by segment (segment 1 is nearest the "
-        "junction), and average waiting time. Heavier queues, more approaching "
-        "vehicles, and longer waits on a phase's lanes make that phase the "
-        "better choice; the current phase's lanes have already been moving."
-    )
-    return {
-        "type": "choice",
-        "instructions": instructions,
-        "criteria": criteria,
-    }
-
-
-def llmlight_phase_question(
+def jevlight_phase_question(
     observation: IntersectionObservation,
     phase_duration: float,
     state_path: str = "intersection",
 ) -> Dict[str, Any]:
-    """LLMLight-style prompt: one agent per intersection, local view only.
+    """JevLight prompt: one agent per intersection, local view only.
 
     Wording follows LLMLight's original per-intersection signal-control
     prompt (the intersection's own lanes and current pressure, no network
@@ -195,13 +169,13 @@ def llmlight_phase_question(
     }
 
 
-def collmlight_phase_question(
+def cojevlight_phase_question(
     observation: IntersectionObservation,
     phase_duration: float,
     state_path: str,
     network_size: int,
 ) -> Dict[str, Any]:
-    """CoLLMLight-style prompt: one network-level agent, coordinated view.
+    """CoJevLight prompt: one network-level agent, coordinated view.
 
     Wording follows CoLLMLight's network-wise signal-control prompt: the
     agent sees the whole road network in one shared state and answers one
@@ -349,8 +323,9 @@ class JevLightController:
         min_confidence: float = 0.0,
         speculative: bool = True,
         max_workers: int = 8,
-        agent_mode: str = "jevlight",
+        agent_mode: str = "cojevlight",
     ):
+        agent_mode = AGENT_MODE_ALIASES.get(agent_mode, agent_mode)
         if agent_mode not in AGENT_MODES:
             raise ValueError(
                 f"agent_mode must be one of {AGENT_MODES}, got {agent_mode}"
@@ -390,18 +365,16 @@ class JevLightController:
         network_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """The phase Choice question worded for the active agent mode."""
-        if self.agent_mode == "llmlight":
-            return llmlight_phase_question(
+        if self.agent_mode == "jevlight":
+            return jevlight_phase_question(
                 observation, self.phase_duration, state_path
             )
-        if self.agent_mode == "collmlight":
-            return collmlight_phase_question(
-                observation,
-                self.phase_duration,
-                state_path,
-                network_size or 1,
-            )
-        return phase_question(observation, self.phase_duration, state_path)
+        return cojevlight_phase_question(
+            observation,
+            self.phase_duration,
+            state_path,
+            network_size or 1,
+        )
 
     @staticmethod
     def _phase_to_action(observation: IntersectionObservation, phase: str) -> int:

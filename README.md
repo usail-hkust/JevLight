@@ -1,6 +1,6 @@
 # JevLight
 
-Traffic signal control with **Jev**, the System One decision model — applied to SUMO simulation on top of the observation and control-flow conventions of [ChatLight](https://github.com/SQLai2099/ChatLight)'s migrated **LLMLight / CoLLMLight** paths.
+Traffic signal control with **Jev**, the System One decision model — applied to SUMO simulation on top of the observation and control-flow conventions of **LLMLight / CoLLMLight**.
 
 Jev is not a chat model: one request sends a **state** plus a map of typed **questions**, and returns one typed answer per question, evaluated in parallel. JevLight maps signal control directly onto that interface — the model picks an action from the options you give it, with pure-text prompts and millisecond-scale decisions.
 
@@ -103,20 +103,19 @@ Caveats, stated plainly: logit-readout probabilities from a general open checkpo
 
 ## Agent modes
 
-`--agent` selects the prompt wording and request pattern on the same Jev interface, reproducing the two migrated ChatLight baselines:
+`--agent` selects the prompt wording and request pattern on the same Jev interface — the two migrated ChatLight baselines with Jev as the decision model:
 
 | Mode | Prompt | Packaging | Congestion Noul |
 | --- | --- | --- | --- |
-| `jevlight` (default) | native JevLight mapping | network | yes |
-| `llmlight` | LLMLight: one agent per intersection, local view only | per_intersection | no |
-| `collmlight` | CoLLMLight: one network-level agent, coordinated view | network | yes |
+| `jevlight` | JevLight: one agent per intersection, local view only (LLMLight pattern) | per_intersection | no |
+| `cojevlight` (default) | CoJevLight: one network-level agent, coordinated view (CoLLMLight pattern) | network | yes |
 
 ```bash
-python run_jevlight.py --agent llmlight   # LLMLight request pattern
-python run_jevlight.py --agent collmlight # CoLLMLight request pattern
+python run_jevlight.py --agent jevlight   # per-intersection agent
+python run_jevlight.py --agent cojevlight # network-level agent (default)
 ```
 
-`--packaging` and `--no_speculative` still override the per-mode defaults; each decision trace records the active `agent_mode`.
+The pre-release names `llmlight` / `collmlight` remain accepted as aliases. `--packaging` and `--no_speculative` still override the per-mode defaults; each decision trace records the active `agent_mode`.
 
 ## 3D visualization (SUMO)
 
@@ -166,8 +165,8 @@ python run_jevlight.py --jev_transport official --count 900 \
 scripts/serve_jev.sh --model tev1          # start the service first
 python run_jevlight.py --jev_transport local --count 900
 
-# 6) LLMLight-style per-intersection requests + rolling evaluation:
-python run_jevlight.py --packaging per_intersection --count 3600 --rolling_evaluation
+# 6) Per-intersection (jevlight agent) requests + rolling evaluation:
+python run_jevlight.py --agent jevlight --count 3600 --rolling_evaluation
 ```
 
 `--dry_run` swaps the controller for a classic **MaxPressure** agent: each intersection activates the phase whose lanes hold the most vehicles (queued + approaching — the same pressure the mock Jev scores), entirely local, zero Jev requests, no key or transport needed. Traces record the per-phase pressures, and `summary.json` carries `"dry_run": true` with zero Jev usage — the canonical no-LLM baseline to compare the Jev paths against.

@@ -1,5 +1,5 @@
 """Unit tests for the local transport, the local Jev server, and the
-llmlight/collmlight agent modes (no network beyond loopback, no SUMO)."""
+jevlight/cojevlight agent modes (no network beyond loopback, no SUMO)."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from jevlight.controller import (
     CONGESTION_QUESTION_PREFIX,
     JevLightController,
     MaxPressureController,
-    collmlight_phase_question,
-    llmlight_phase_question,
+    cojevlight_phase_question,
+    jevlight_phase_question,
     phase_pressure,
 )
 from jevlight.jev_client import (
@@ -444,9 +444,9 @@ class TestSystemOneHttp:
 
 
 class TestAgentModeQuestions:
-    def test_llmlight_prompt_is_per_intersection(self):
+    def test_jevlight_prompt_is_per_intersection(self):
         observation = make_observation()
-        question = llmlight_phase_question(observation, 15)
+        question = jevlight_phase_question(observation, 15)
         assert question["type"] == "choice"
         assert "signal control agent for intersection `intersection`" in (
             question["instructions"]
@@ -455,9 +455,9 @@ class TestAgentModeQuestions:
             "ETWT", "NTST", "ELWL", "NLSL",
         }
 
-    def test_collmlight_prompt_is_network_level(self):
+    def test_cojevlight_prompt_is_network_level(self):
         observation = make_observation()
-        question = collmlight_phase_question(
+        question = cojevlight_phase_question(
             observation, 15, "intersections.i0", network_size=12
         )
         assert "network-level signal control agent coordinating 12" in (
@@ -478,18 +478,18 @@ class TestAgentModeController:
             ]
         )
         # Mirror the runner's per-agent defaults for the speculative Noul.
-        kwargs.setdefault("speculative", agent_mode != "llmlight")
+        kwargs.setdefault("speculative", agent_mode != "jevlight")
         controller = JevLightController(
             client,
             15,
-            packaging=("per_intersection" if agent_mode == "llmlight" else "network"),
+            packaging=("per_intersection" if agent_mode == "jevlight" else "network"),
             agent_mode=agent_mode,
             **kwargs,
         )
         return controller, client
 
-    def test_llmlight_sends_local_state_and_no_noul(self):
-        controller, client = self.make_controller("llmlight")
+    def test_jevlight_sends_local_state_and_no_noul(self):
+        controller, client = self.make_controller("jevlight")
         observations = [make_observation("i0"), make_observation("i1", empty=True)]
         controller.decide(observations, step=0)
         # Only the active intersection issues a request; its state is the
@@ -502,8 +502,8 @@ class TestAgentModeController:
             request["questions"]["phase_i0"]["instructions"]
         )
 
-    def test_collmlight_sends_network_state_and_noul(self):
-        controller, client = self.make_controller("collmlight")
+    def test_cojevlight_sends_network_state_and_noul(self):
+        controller, client = self.make_controller("cojevlight")
         observations = [make_observation("i0"), make_observation("i1")]
         controller.decide(observations, step=0)
         assert len(client.requests) == 1
@@ -518,9 +518,20 @@ class TestAgentModeController:
         )
 
     def test_trace_records_agent_mode(self):
-        controller, _client = self.make_controller("llmlight")
+        controller, _client = self.make_controller("jevlight")
         _actions, traces = controller.decide([make_observation("i0")], step=0)
-        assert traces[0]["agent_mode"] == "llmlight"
+        assert traces[0]["agent_mode"] == "jevlight"
+
+    def test_pre_release_mode_names_stay_aliases(self):
+        # ``llmlight`` / ``collmlight`` normalize to the renamed modes.
+        for old_name, canonical in (
+            ("llmlight", "jevlight"),
+            ("collmlight", "cojevlight"),
+        ):
+            controller = JevLightController(
+                StubJevClient(), 15, agent_mode=old_name
+            )
+            assert controller.agent_mode == canonical
 
     def test_invalid_agent_mode_rejected(self):
         try:

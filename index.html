@@ -443,8 +443,8 @@
     </div>
     <div class="feat">
       <div class="ico" style="background:rgba(255,93,93,0.1); border-color:rgba(255,93,93,0.3);">🧭</div>
-      <h3>Three agent modes</h3>
-      <p><code>jevlight</code> (native network-level), <code>llmlight</code> (one agent per intersection) and <code>collmlight</code> (coordinated network agent) — same interface, reproducible baselines.</p>
+      <h3>Two agent modes</h3>
+      <p><code>jevlight</code> — one agent per intersection with a purely local view; <code>cojevlight</code> (default) — a single network-level agent coordinating every junction in one request. Same Jev interface, two request patterns.</p>
     </div>
     <div class="feat">
       <div class="ico" style="background:rgba(61,220,132,0.1); border-color:rgba(61,220,132,0.3);">🌐</div>
@@ -540,9 +540,9 @@ python run_jevlight.py <span class="k">--dataset</span> jinan <span class="k">--
 python run_jevlight.py <span class="k">--jev_transport</span> local <span class="k">--count</span> 900</pre>
     </div>
     <div class="qs-card">
-      <div class="qs-head"><span class="step">6</span><span class="t">Reproduce a baseline</span><button class="copy-btn" data-copy="qs6">copy</button></div>
-      <p>LLMLight request pattern plus rolling evaluation.</p>
-      <pre id="qs6">python run_jevlight.py <span class="k">--agent</span> llmlight <span class="k">--count</span> 3600 <span class="k">--rolling_evaluation</span></pre>
+      <div class="qs-head"><span class="step">6</span><span class="t">Switch to per-intersection</span><button class="copy-btn" data-copy="qs6">copy</button></div>
+      <p>The jevlight agent mode plus rolling evaluation.</p>
+      <pre id="qs6">python run_jevlight.py <span class="k">--agent</span> jevlight <span class="k">--count</span> 3600 <span class="k">--rolling_evaluation</span></pre>
     </div>
   </div>
 </section>

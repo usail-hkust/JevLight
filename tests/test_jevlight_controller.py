@@ -12,8 +12,8 @@ from jevlight.controller import (
     PHASE_QUESTION_PREFIX,
     congestion_question,
     jev_intersection_state,
+    jevlight_phase_question,
     phase_criteria,
-    phase_question,
 )
 from jevlight.jev_client import (
     JevClient,
@@ -126,7 +126,7 @@ class TestStateAndQuestions:
 
     def test_phase_question_wire_format(self):
         observation = make_observation()
-        question = phase_question(observation, 30, "intersections.i0")
+        question = jevlight_phase_question(observation, 30, "intersections.i0")
         assert question["type"] == "choice"
         assert "intersections.i0" in question["instructions"]
         assert set(question["criteria"]) == set(CANONICAL_PHASES)
@@ -351,7 +351,7 @@ class TestMockTransport:
                 }
             }
         }
-        questions = {f"{PHASE_QUESTION_PREFIX}i0": phase_question(
+        questions = {f"{PHASE_QUESTION_PREFIX}i0": jevlight_phase_question(
             make_observation(), 15, "intersections.i0"
         )}
         result = client.evaluate(state, questions)
