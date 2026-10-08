@@ -34,12 +34,14 @@ class FakeVehicleDomain:
                 viz_server.VAR_ANGLE: 90.0,
                 viz_server.VAR_SPEED: 5.0,
                 viz_server.VAR_COLOR: (255, 0, 0, 255),
+                viz_server.VAR_VEHICLECLASS: "passenger",
             },
             "v2": {
                 viz_server.VAR_POSITION3D: (430.0, 850.0, 0.0),
                 viz_server.VAR_ANGLE: 0.0,
                 viz_server.VAR_SPEED: 0.0,
                 viz_server.VAR_COLOR: (0, 200, 255, 255),
+                viz_server.VAR_VEHICLECLASS: "bus",
             },
         }
 
@@ -109,6 +111,25 @@ class TestNetworkModel:
             assert -1e6 < x < 1e6 and -1e6 < y < 1e6
         tls_ids = {entry["id"] for entry in payload["tls"]}
         assert len(tls_ids) == 12
+
+
+class TestVehicleClassMapping:
+    def test_class_index_mapping(self):
+        f = viz_server.vehicle_class_index
+        assert f("passenger") == 0
+        assert f("Bus") == 1
+        assert f("truck") == 1
+        assert f("delivery") == 1
+        assert f("bicycle") == 2
+        assert f("motorcycle") == 2
+        assert f(None) == 0
+        assert f("") == 0
+
+    def test_vehicle_rows_carry_class_index(self):
+        frame = viz_server.capture_frame(FakeConn(), (400.0, 800.0))
+        by_id = {row[0]: row for row in frame["vehicles"]}
+        assert by_id["v1"][9] == 0  # passenger -> car
+        assert by_id["v2"][9] == 1  # bus -> long vehicle
 
 
 class TestSumoRuntime:

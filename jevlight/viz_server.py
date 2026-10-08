@@ -56,14 +56,40 @@ try:  # pragma: no cover - exercised whenever traci is installed
     VAR_ANGLE = tc.VAR_ANGLE
     VAR_SPEED = tc.VAR_SPEED
     VAR_COLOR = tc.VAR_COLOR
+    VAR_VEHICLECLASS = tc.VAR_VEHICLECLASS
 except Exception:  # pragma: no cover
     VAR_POSITION3D = 0x39
     VAR_POSITION = 0x42
     VAR_ANGLE = 0x43
     VAR_SPEED = 0x40
     VAR_COLOR = 0x45
+    VAR_VEHICLECLASS = 0x73
 
-SUBSCRIPTION_VARS = (VAR_POSITION3D, VAR_ANGLE, VAR_SPEED, VAR_COLOR)
+SUBSCRIPTION_VARS = (
+    VAR_POSITION3D,
+    VAR_ANGLE,
+    VAR_SPEED,
+    VAR_COLOR,
+    VAR_VEHICLECLASS,
+)
+
+# SUMO vClass -> size class used by the 3D vehicle models:
+# 0 = passenger car, 1 = long vehicle (bus/truck/trailer/delivery),
+# 2 = two-wheeler (bicycle/moped/motorcycle).
+VEHICLE_CLASS_IDS = {
+    "bus": 1,
+    "truck": 1,
+    "trailer": 1,
+    "delivery": 1,
+    "bicycle": 2,
+    "moped": 2,
+    "motorcycle": 2,
+}
+
+
+def vehicle_class_index(vclass: Any) -> int:
+    """Map a SUMO vehicle class string to the 3D model size class."""
+    return VEHICLE_CLASS_IDS.get(str(vclass or "").strip().lower(), 0)
 
 
 # ---------------------------------------------------------------------- #
@@ -137,7 +163,8 @@ def subscribe_vehicles(conn: Any, subscribed: set) -> None:
 def capture_frame(conn: Any, offset: Tuple[float, float]) -> Dict[str, Any]:
     """One snapshot: vehicle rows + traffic-light states, net coordinates.
 
-    Vehicle row: ``[id, x, y, z, angle, speed, r, g, b]``.
+    Vehicle row: ``[id, x, y, z, angle, speed, r, g, b, class_idx]`` —
+    ``class_idx`` picks the 3D model size (car / long vehicle / two-wheeler).
     """
     results = conn.vehicle.getAllSubscriptionResults() or {}
     vehicles = []
@@ -156,6 +183,7 @@ def capture_frame(conn: Any, offset: Tuple[float, float]) -> Dict[str, Any]:
             int(color[0]),
             int(color[1]),
             int(color[2]),
+            vehicle_class_index(data.get(VAR_VEHICLECLASS)),
         ])
     tls_states = {}
     for tid in conn.trafficlight.getIDList():

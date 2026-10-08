@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>JevLight 3D — SUMO visualizer</title>
+  <title>JevLight 3D — SUMO city visualizer</title>
   <style>
     :root {
       --bg: #0b0e13;
@@ -40,9 +40,10 @@
     }
     button:hover, select:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 700; }
+    button.active { background: #233b1f; border-color: var(--green); color: var(--green); }
     #tlsbar {
       position: fixed; bottom: 12px; left: 12px; display: flex; flex-wrap: wrap;
-      gap: 6px; max-width: 60%;
+      gap: 6px; max-width: 38%;
     }
     .tls {
       background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
@@ -53,7 +54,7 @@
     .tls.y .dot { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
     .tls.r .dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
     #help {
-      position: fixed; bottom: 12px; right: 12px; color: var(--muted);
+      position: fixed; bottom: 12px; left: 40%; color: var(--muted);
       background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
       padding: 8px 12px;
     }
@@ -61,6 +62,45 @@
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       color: var(--muted); font-size: 15px; z-index: -1;
     }
+
+    /* ---- traffic camera mode ---- */
+    #camview {
+      position: fixed; right: 12px; bottom: 12px; width: min(52vw, 860px);
+      display: none; flex-direction: column; gap: 8px; z-index: 5;
+    }
+    #camview.on { display: flex; }
+    #camgrid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .campanel {
+      position: relative; border: 1px solid var(--line); border-radius: 8px;
+      overflow: hidden; background: #05070a; aspect-ratio: 16 / 9;
+    }
+    .campanel .tag {
+      position: absolute; top: 6px; left: 8px; background: rgba(5, 7, 10, 0.75);
+      border-radius: 5px; padding: 2px 8px; font-size: 11px; color: var(--green);
+      letter-spacing: 0.06em;
+    }
+    .campanel .rec {
+      position: absolute; top: 8px; right: 10px; color: var(--red); font-size: 11px;
+    }
+    .campanel .rec::before {
+      content: "●"; margin-right: 5px; animation: blink 1.2s infinite;
+    }
+    @keyframes blink { 50% { opacity: 0.15; } }
+    #camhead { display: flex; gap: 8px; align-items: center; }
+    #camtitle { color: var(--green); letter-spacing: 0.05em; }
+    #camlist {
+      display: flex; flex-wrap: wrap; gap: 6px; max-height: 108px; overflow-y: auto;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px;
+    }
+    .camitem {
+      border: 1px solid var(--line); background: #151b25; color: var(--muted);
+      border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12px;
+    }
+    .camitem:hover { border-color: var(--accent); color: var(--text); }
+    .camitem.selected { border-color: var(--green); color: var(--green); background: #16281c; }
   </style>
   <script type="importmap">
     {
@@ -75,7 +115,7 @@
   <canvas id="scene"></canvas>
   <div id="banner">loading SUMO network…</div>
   <div id="hud">
-    <div class="panel" id="title">JEVLIGHT&nbsp;3D<small>SUMO live visualization</small></div>
+    <div class="panel" id="title">JEVLIGHT&nbsp;3D<small>SUMO city visualization</small></div>
     <div class="panel" id="stats">
       <div class="stat"><b id="time">0</b> <span>s</span></div>
       <div class="stat"><b id="vehicles">0</b> <span>vehicles</span></div>
@@ -91,11 +131,29 @@
         <option value="4">4×</option>
         <option value="8">8×</option>
       </select>
-      <button id="cam" title="reset camera">⟳ Cam</button>
+      <button id="cam" title="traffic camera at a random junction">📹 Cam</button>
+      <button id="reroll" title="move camera to another junction" style="display:none">🎲</button>
+      <button id="camoff" title="close camera view" style="display:none">✕</button>
+      <button id="resetcam" title="reset main camera">⟳ Cam</button>
     </div>
   </div>
   <div id="tlsbar"></div>
   <div id="help">drag&nbsp;·&nbsp;orbit&nbsp;&nbsp;|&nbsp;&nbsp;wheel&nbsp;·&nbsp;zoom&nbsp;&nbsp;|&nbsp;&nbsp;right-drag&nbsp;·&nbsp;pan</div>
+
+  <div id="camview">
+    <div id="camhead" class="panel">
+      <span id="camtitle">📹 —</span>
+      <span style="color:var(--muted)">click a junction below to switch</span>
+    </div>
+    <div id="camgrid">
+      <div class="campanel" id="cam0"><span class="tag">—</span><span class="rec">REC</span></div>
+      <div class="campanel" id="cam1"><span class="tag">—</span><span class="rec">REC</span></div>
+      <div class="campanel" id="cam2"><span class="tag">—</span><span class="rec">REC</span></div>
+      <div class="campanel" id="cam3"><span class="tag">—</span><span class="rec">REC</span></div>
+    </div>
+    <div id="camlist"></div>
+  </div>
+
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>
