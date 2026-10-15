@@ -40,6 +40,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import copy
 import json
 import os
@@ -69,6 +70,7 @@ from jevlight.controller import (
 )
 from jevlight.env_bridge import JevLightEnv
 from jevlight.evaluation_metrics import calculate_evaluation_metrics_from_env
+from jevlight.images import ImageRenderer
 from jevlight.jev_client import (
     DEFAULT_JEV_MODEL,
     DEFAULT_LOCAL_BASE_URL,
@@ -223,6 +225,19 @@ def parse_args():
         help="Deterministic local answers for pipeline smoke tests (no API)",
     )
     parser.add_argument(
+        "--image_decisions",
+        action="store_true",
+        help=(
+            "Enable experimental direct image-to-phase decisions on official "
+            "TypeSafe. Captures the existing Three.js visualizer headlessly."
+        ),
+    )
+    parser.add_argument(
+        "--image_prompt",
+        default=None,
+        help="Append task instructions to the direct image-to-phase prompt",
+    )
+    parser.add_argument(
         "--dry_run",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -355,10 +370,26 @@ def build_wandb_group(dataset_config, env_config, traffic_file):
 
 
 def run(args):
+    with ExitStack() as resources:
+        return _run(args, resources)
+
+
+def _run(args, resources):
     if args.duration <= 5:
         raise ValueError("duration must be greater than the 5-second yellow time")
     if args.count <= 0:
         raise ValueError("count must be positive")
+    if args.image_decisions and args.dry_run:
+        raise ValueError("--image_decisions cannot be combined with --dry_run")
+    if args.image_decisions and args.jev_transport != "official":
+        raise ValueError("--image_decisions requires --jev_transport official")
+    if args.image_decisions:
+        if args.packaging not in (None, "per_intersection") or args.fallback != "previous":
+            raise ValueError("image mode requires per_intersection packaging and previous fallback")
+        args.agent = "jevlight"
+        args.packaging = "per_intersection"
+        args.no_speculative = True
+        args.jev_model = args.jev_model or "jev-1.14.0"
 
     dataset_config = setup_dataset_config(args.dataset)
     if args.road_net:
@@ -445,6 +476,7 @@ def run(args):
         args.traffic_file,
     )
     env = simulator.env
+    resources.callback(env.end_engine)
     if args.start_time:
         simulator.reset_env_with_start_time(args.start_time)
 
@@ -453,6 +485,12 @@ def run(args):
     # play/pause/step buttons gate the loop between steps.
     viz_runtime: Optional[PassiveRuntime] = None
     viz_server = None
+    image_renderer = None
+    if args.image_decisions:
+        image_renderer = resources.enter_context(ImageRenderer(
+            roadnet_path,
+            Path(paths["PATH_TO_WORK_DIRECTORY"]) / "vision_frames",
+        ))
     if args.visualize:
         viz_network = NetworkModel.load(roadnet_path)
         viz_conn = getattr(env, "traci_conn", None)
@@ -468,6 +506,9 @@ def run(args):
             host=args.viz_host,
             port=args.viz_port,
         )
+        resources.callback(viz_server.server_close)
+        resources.callback(viz_server.shutdown)
+        resources.callback(viz_runtime.close)
         if viz_conn:
             viz_runtime.publish(viz_conn)
         open_viz_page(viz_url)
@@ -512,6 +553,8 @@ def run(args):
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
                 "traffic_file": args.traffic_file,
+                "input_mode": "image" if args.image_decisions else "text",
+                "mock_jev": bool(args.mock_jev),
             },
         )
         rolling_recorder.attach(env, evaluation_start_time=args.start_time)
@@ -536,7 +579,17 @@ def run(args):
                 if viz_runtime is not None:
                     viz_runtime.wait_until_running()
                 observations = collect_observations(env)
-                actions, traces = controller.decide(observations, step)
+                if args.image_decisions:
+                    image_paths = image_renderer.capture(
+                        env.traci_conn,
+                        [observation.intersection_id for observation in observations],
+                        step,
+                    )
+                    actions, traces = controller.decide_images(
+                        observations, image_paths, step, prompt=args.image_prompt
+                    )
+                else:
+                    actions, traces = controller.decide(observations, step)
                 step_duration = args.duration
                 if args.rolling_evaluation:
                     step_duration = min(
@@ -593,6 +646,9 @@ def run(args):
                 "min_confidence": args.min_confidence,
                 "dry_run": bool(args.dry_run),
                 "visualize": bool(args.visualize),
+                "image_decisions": bool(args.image_decisions),
+                "input_mode": "image" if args.image_decisions else "text",
+                "mock_jev": bool(args.mock_jev),
                 **metrics,
                 "jev": controller.usage_summary(),
             },
@@ -607,13 +663,7 @@ def run(args):
                 time.sleep(0.5)
         except KeyboardInterrupt:
             pass
-    if viz_runtime is not None:
-        viz_runtime.close()
-    if viz_server is not None:
-        viz_server.shutdown()
-        viz_server.server_close()
     env.batch_log()
-    env.end_engine()
     print(json.dumps(metrics, indent=2))
     print(f"Decision log: {trace_path}")
     print(f"Summary: {summary_path}")

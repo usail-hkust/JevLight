@@ -3,6 +3,7 @@ numpy
 pandas
 requests
 tqdm
+Pillow
 
 # SUMO runtime: either install eclipse-sumo from pip or set SUMO_HOME
 # to a SUMO >= 1.20 installation providing traci/sumolib.

@@ -2,7 +2,7 @@
 
 Traffic signal control with **Jev**, the System One decision model — applied to SUMO simulation on top of the observation and control-flow conventions of **LLMLight / CoLLMLight**.
 
-Jev is not a chat model: one request sends a **state** plus a map of typed **questions**, and returns one typed answer per question, evaluated in parallel. JevLight maps signal control directly onto that interface — the model picks an action from the options you give it, with pure-text prompts and millisecond-scale decisions.
+Jev is not a chat model: one request sends a **state** plus a map of typed **questions**, and returns one typed answer per question, evaluated in parallel. JevLight maps signal control directly onto that interface: the model picks an action from the options you give it. The default path uses structured traffic observations; the optional experimental image path uses camera images and a prompt.
 
 ## How signal control maps onto Jev
 
@@ -15,7 +15,7 @@ Jev is not a chat model: one request sends a **state** plus a map of typed **que
 
 **Network packaging** (default): every active intersection is packed into one shared state with one question each — the whole road network decides in a **single API call per control step** (Jev evaluates all questions against the state in parallel, so extra questions barely change latency). With `--packaging per_intersection` each junction gets its own request, matching LLMLight's request pattern.
 
-Fallbacks follow the ChatLight source conventions:
+The default text path follows the ChatLight source conventions:
 
 - Empty junctions (no vehicles) never call the API; they use the exact CoLLMLight local waiting-time ranking.
 - Failed / rate-limited / unparsable requests keep the previous signal (`--fallback previous`, default) or use the local ranking (`--fallback ranking`).
@@ -39,6 +39,7 @@ scripts/serve_jev.sh       # start a local Jev-style model service (vLLM/mock)
 scripts/serve_3d.py        # 3D SUMO visualizer bridge (traci -> SSE)
 jevlight/viz_server.py     # visualizer server core (standalone + --visualize)
 viz/                       # three.js frontend for the 3D visualizer
+jevlight/images.py         # synchronized headless camera capture for image decisions
 utils/
   sumo_env.py              # SUMO runtime (from ChatLight, profiling hook stubbed)
   phase_utils.py           # phase helpers (from ChatLight)
@@ -66,6 +67,82 @@ Three transports are supported:
 | `local` | self-hosted Jev-compatible server (`$JEV_LOCAL_BASE_URL`, default `http://127.0.0.1:8123`) | none |
 
 All transports answer the same `state` + typed `questions` request.
+
+## Experimental image decisions (Jev 1.14)
+
+TypeSafe's [image API](https://docs.typesafe.ai/images) accepts an image plus
+instructions and returns the same typed `choice` answer. This path uses **one
+direct decision per intersection**, with no separate perception model, fast/slow
+reasoning, or VLALight training code. The default model is pinned to
+`jev-1.14.0`; a versioned ID avoids changes to the `jev-preview`/`jev-latest`
+aliases during an experiment.
+
+```bash
+pip install -r requirements-images.txt
+python -m playwright install chromium
+export TYPESAFE_API_KEY=...
+python run_jevlight.py --jev_transport official --image_decisions \
+  --dataset jinan --count 900
+
+# Capture + control-loop smoke test, without an API key or vision inference:
+python run_jevlight.py --jev_transport official --image_decisions \
+  --mock_jev --count 30
+```
+
+`--image_prompt "Prioritize visible spillback"` appends task instructions to
+the camera/phase prompt. Image mode selects `jevlight`, `per_intersection`
+packaging and `previous` fallback, and omits the speculative congestion question.
+Explicit network packaging, ranking fallback and `--dry_run` are rejected.
+The MCP endpoint and the repository's text-only local adapter have no image
+support in this implementation.
+
+At each control boundary, SUMO stays paused while its **current** vehicle
+positions and signals populate the existing Three.js scene in headless Chromium.
+Each junction produces a 1024×768 JPEG with four approach views labelled by
+vehicle travel direction. The renderer currently requires four approaches, as in
+the supplied grid datasets. It uses the visualizer's CDN imports, so Chromium
+must be able to reach `unpkg.com` when starting a run.
+
+Only the image, junction ID, current phase, control interval and phase criteria
+reach Jev. Queue counts, waiting times, occupancy, and neighboring state are not
+included. Empty junctions also receive image decisions. API errors, invalid
+choices and low confidence keep the previous phase; a rendering failure stops
+the run. `--mock_jev` chooses the first allowed phase and is **not a vision
+benchmark**.
+
+The HTTP client uses the documented multipart protocol: JSON `request` first,
+an `assets` map referring to JPEG/PNG file parts, and the explicit
+`TypeSafe-Danger-Zone-Images: true` header. Images bypass the optional SDK so
+older SDK versions cannot silently discard assets. File format, dimensions,
+references and upload size are checked before sending. The experiment saves
+the exact frames under `records/<memo>/<run>/vision_frames/` and records their
+paths, prompt, answer, confidence, fallback, tokens and request latency in
+`jev_decisions.jsonl`. Summary files distinguish image/text and mock runs.
+
+For an already captured image, the low-level API is also available:
+
+```python
+from pathlib import Path
+from uuid import uuid4
+from jevlight.jev_client import JevClient
+
+ref = str(uuid4())
+client = JevClient(transport="official", model="jev-1.14.0")
+result = client.evaluate(
+    state={"camera_image": ref},
+    questions={"phase": {"type": "choice",
+        "instructions": "Use camera_image to choose the next traffic phase.",
+        "criteria": {"ETWT": "east/west through", "NTST": "north/south through"}}},
+    assets={ref: Path("camera.jpg")},
+)
+```
+
+Images are an opt-in **Danger Zone** experiment, not a production feature.
+[Box](https://docs.typesafe.ai/primitives/box) localizes objects; it is unnecessary
+for choosing a signal phase. The separate 262k-context feature is also unnecessary
+here, so this path does not enable it. See the official
+[release notes](https://typesafe.ai/blog/jev-1-14) and
+[model limits](https://docs.typesafe.ai/models).
 
 Community-endpoint notes (observed behavior):
 
