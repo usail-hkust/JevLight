@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from jevlight.viz_server import (
     NetworkModel, PassiveRuntime, start_viz_server, vehicle_class_index,
@@ -36,12 +36,29 @@ def camera_snapshot(conn: Any) -> Dict[str, Any]:
     }
 
 
+def prune_frames(frames: Dict[str, list], keep: int) -> None:
+    """Delete all but the newest ``keep`` frame paths for each junction."""
+    for history in frames.values():
+        while len(history) > keep:
+            stale = history.pop(0)
+            try:
+                Path(stale).unlink()
+            except FileNotFoundError:
+                pass
+
+
 class ImageRenderer:
     """One headless Chromium instance for an experiment's camera composites."""
 
-    def __init__(self, roadnet_path: str, output_dir: Path):
+    def __init__(
+        self, roadnet_path: str, output_dir: Path, keep_frames: Optional[int] = None,
+    ):
+        if keep_frames is not None and keep_frames < 0:
+            raise ValueError("keep_frames must be non-negative")
         self.network = NetworkModel.load(roadnet_path)
         self.output_dir = Path(output_dir)
+        self.keep_frames = keep_frames
+        self._frames: Dict[str, list] = {}
         self._stack = ExitStack()
 
     def __enter__(self):
@@ -96,7 +113,21 @@ class ImageRenderer:
             path = self.output_dir / f"step_{step:06d}_junction_{index:04d}.jpg"
             path.write_bytes(base64.b64decode(data_url.split(",", 1)[1], validate=True))
             paths[intersection_id] = path
+            self._frames.setdefault(intersection_id, []).append(path)
         return paths
 
+    def release(self) -> None:
+        """Drop frames beyond ``keep_frames`` once their requests have finished.
+
+        ``keep_frames=None`` keeps every frame (the historical behaviour);
+        ``0`` keeps none, so a long benchmark never accumulates more than one
+        step of JPEGs per junction.
+        """
+        if self.keep_frames is None:
+            return
+        prune_frames(self._frames, self.keep_frames)
+
     def __exit__(self, *exc):
+        if self.keep_frames == 0:
+            self.release()
         self._stack.close()

@@ -494,7 +494,7 @@ class JevLightController:
         available = {
             canonical_phase_name(phase) for phase in observation.phases
         }
-        if signal not in available:
+        if not isinstance(signal, str) or signal not in available:
             fallback_signal, reason = self._fallback_signal(
                 observation, "invalid_choice"
             )

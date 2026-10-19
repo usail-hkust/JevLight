@@ -197,6 +197,10 @@ references and upload size are checked before sending. The experiment saves
 the exact frames under `records/<memo>/<run>/vision_frames/` and records their
 paths, prompt, answer, confidence, fallback, tokens and request latency in
 `jev_decisions.jsonl`. Summary files distinguish image/text and mock runs.
+Frame retention is opt-in: the default keeps every frame, which is a few
+hundred megabytes per junction-hour (a 16-junction, six-hour seed writes about
+92,000 JPEGs), so pass `--keep_frames 0` to delete each frame once its decision
+completed or `--keep_frames N` to keep only the N newest per junction.
 
 For an already captured image, the low-level API is also available:
 
@@ -427,15 +431,11 @@ python scripts/benchmark_vlalight_jev.py --method jev-image --execute
 
 ### Vision benchmark status
 
-This branch contains the Vision API and VLALight evaluation code only. Generated
+This directory contains the Vision API and VLALight evaluation code. Generated
 SUMO traces, API responses, logs and score tables are deliberately left out of
-the pull request while the full run is still in progress. The result fields
-will be filled in a follow-up commit after all scenarios and seeds finish:
-
-| Evaluation | Model/input | Status | Results |
-| --- | --- | --- | --- |
-| VLALight camera decisions | Jev 1.14.0, image + prompt | running | pending |
-| MaxPressure reference | SUMO state, no Jev request | pending | pending |
+git: they land in `records/<memo>/<run>/` (`summary.json`, `jev_decisions.jsonl`,
+`vision_frames/`), which is ignored. The camera-decision numbers are reported
+from those local artifacts and are not published to this README.
 
 The Vision path is a direct image decision test: the existing VLALight renderer
 creates the camera image, Jev receives that image and the traffic-control prompt,
@@ -467,13 +467,13 @@ Completed seeds are reused; an unfinished seed restarts from its beginning,
 since this path does not save SUMO state checkpoints. A successful full matrix
 is committed locally on `local/jev-vlalight-benchmark`, without a push or PR.
 
-[Local measurements and protocol](results/vlalight_jev/README.md) include the
-baseline results, image smoke checks, dataset hashes and evaluation limits.
-Only completed real Jev seeds enter its score table; the report shows current
-completion counts and keeps short API preflights separate from model scores.
-The fixed horizon covers departures without clearing the network; unfinished
-trips and teleports must be considered alongside travel time. These SUMO results
-are separate from the historical CityFlow numbers.
+Per-seed measurements and the evaluation protocol live in the run's own
+`summary.json` and `jev_decisions.jsonl` together with the dataset and roadnet
+hashes; they are not committed because `records/` is gitignored. Only completed
+real Jev seeds enter the score table; short API preflights are kept separate
+from model scores. The fixed horizon covers departures without clearing the
+network; unfinished trips and teleports must be considered alongside travel
+time. These SUMO results are separate from the historical CityFlow numbers.
 
 ## Tests
 

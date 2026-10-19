@@ -9,6 +9,8 @@ import sys
 
 from PIL import Image, ImageDraw
 
+from jevlight.images import prune_frames
+
 SCENES = {("Jinan", "3_4"): "Jinan", ("Hangzhou", "4_4"): "Hangzhou",
           ("NewYork", "28_7"): "NewYork", ("NewYork", "16x3"): "NewYork16x3"}
 
@@ -54,13 +56,18 @@ def compose_views(views, labels):
 
 
 class VLALightRenderer:
-    def __init__(self, source_root, dataset_config, roadnet, output_dir, batch_size=4):
+    def __init__(self, source_root, dataset_config, roadnet, output_dir, batch_size=4,
+                 keep_frames=None):
         if batch_size < 1:
             raise ValueError("render_batch_size must be positive")
+        if keep_frames is not None and keep_frames < 0:
+            raise ValueError("keep_frames must be non-negative")
         self.source_root = Path(source_root).resolve()
         self.roadnet = Path(roadnet).resolve()
         self.output_dir = Path(output_dir)
         self.batch_size = batch_size
+        self.keep_frames = keep_frames
+        self._frames = {}
         key = (dataset_config["template"], dataset_config["road_net"])
         if key not in SCENES:
             raise ValueError(f"No VLALight GLB assets registered for {key}")
@@ -130,11 +137,18 @@ class VLALightRenderer:
                 path = self.output_dir / f"step_{step:06d}_{tls}.jpg"
                 image.save(path, quality=90)
                 paths[tls] = path
+                self._frames.setdefault(tls, []).append(path)
         if set(paths) != set(tls_ids):
             raise RuntimeError("Incomplete VLALight image batch")
         return paths
 
+    def release(self) -> None:
+        if self.keep_frames is not None:
+            prune_frames(self._frames, self.keep_frames)
+
     def __exit__(self, *_exc):
+        if self.keep_frames == 0:
+            self.release()
         if self.renderer is not None:
             self.renderer.destroy()
             self.renderer = None

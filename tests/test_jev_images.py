@@ -1,6 +1,7 @@
 """Image protocol and policy checks; no external API, browser, or SUMO needed."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
@@ -8,9 +9,13 @@ import pytest
 import requests
 
 from jevlight.controller import JevLightController
-from jevlight.images import camera_snapshot
+from jevlight.images import ImageRenderer, camera_snapshot, prune_frames
 from jevlight.jev_client import JevClient, JevResult
 from tests.test_jevlight_controller import make_observation, phase_answer
+
+NET_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "Jinan" / "3_4" / "roadnet_3_4.net.xml"
+)
 
 
 @pytest.fixture
@@ -154,6 +159,8 @@ def test_image_policy_includes_empty_junctions_without_numeric_oracle(image_path
 
 
 @pytest.mark.parametrize("answer", [None, "invalid", {"type": "choice", "choice": "BAD"},
+                                  {"type": "choice", "choice": ["NTST"]},
+                                  {"type": "choice", "choice": {"name": "NTST"}},
                                   phase_answer("NTST", confidence="NaN")])
 def test_invalid_vision_answer_keeps_previous_signal(answer, image_path):
     client = ImageStub(answer)
@@ -161,6 +168,47 @@ def test_invalid_vision_answer_keeps_previous_signal(answer, image_path):
     actions, traces = controller.decide_images([make_observation()], {"i0": image_path}, 0)
     assert actions == {"i0": 0}
     assert traces[0]["fallback"] is not None
+
+
+def test_keep_frames_prunes_old_frames_per_junction(tmp_path):
+    renderer = ImageRenderer(str(NET_PATH), tmp_path, keep_frames=1)
+    old, new = tmp_path / "old.jpg", tmp_path / "new.jpg"
+    old.write_bytes(b"jpeg")
+    new.write_bytes(b"jpeg")
+    renderer._frames = {"i0": [old, new]}
+    renderer.release()
+    assert renderer._frames == {"i0": [new]}
+    assert new.exists() and not old.exists()
+    renderer.release()  # Repeated releases are harmless.
+    assert new.exists()
+
+
+def test_keep_frames_zero_deletes_every_recorded_frame(tmp_path):
+    renderer = ImageRenderer(str(NET_PATH), tmp_path, keep_frames=0)
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"jpeg")
+    renderer._frames = {"i0": [frame]}
+    renderer.release()
+    assert renderer._frames == {"i0": []}
+    assert not frame.exists()
+
+
+def test_keep_frames_default_keeps_every_frame_and_validates_value(tmp_path):
+    renderer = ImageRenderer(str(NET_PATH), tmp_path)
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"jpeg")
+    renderer._frames = {"i0": [frame]}
+    renderer.release()
+    assert frame.exists()
+    with pytest.raises(ValueError):
+        ImageRenderer(str(NET_PATH), tmp_path, keep_frames=-1)
+
+
+def test_prune_frames_tolerates_frames_removed_by_hand(tmp_path):
+    frame = tmp_path / "gone.jpg"
+    frames = {"i0": [frame]}
+    prune_frames(frames, 0)  # The file was never written; no exception.
+    assert frames == {"i0": []}
 
 
 def test_camera_snapshot_preserves_native_coordinates_without_subscriptions():

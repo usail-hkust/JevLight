@@ -255,6 +255,15 @@ def parse_args(argv=None):
     parser.add_argument("--vlalight_root", default="logs/vlalight-source/VLALight",
                         help="VLALight source directory containing TransSimHub")
     parser.add_argument("--render_batch_size", type=int, default=4)
+    parser.add_argument(
+        "--keep_frames",
+        type=int,
+        default=None,
+        help=(
+            "Keep only the N most recent camera frames per junction (0 deletes "
+            "each frame once its decision completed); default keeps every frame"
+        ),
+    )
     parser.add_argument("--fail_on_image_fallback", action="store_true",
                         help="Stop an image benchmark after any fallback; preserve the trace")
     parser.add_argument(
@@ -489,6 +498,11 @@ def _run(args, resources):
         raise ValueError("--image_decisions cannot be combined with --dry_run")
     if args.image_decisions and args.jev_transport != "official":
         raise ValueError("--image_decisions requires --jev_transport official")
+    if args.keep_frames is not None:
+        if not args.image_decisions:
+            raise ValueError("--keep_frames requires --image_decisions")
+        if args.keep_frames < 0:
+            raise ValueError("--keep_frames must be non-negative")
     if args.image_decisions:
         if args.packaging not in (None, "per_intersection") or args.fallback != "previous":
             raise ValueError("image mode requires per_intersection packaging and previous fallback")
@@ -615,10 +629,12 @@ def _run(args, resources):
             from jevlight.vlalight_images import VLALightRenderer
             image_renderer = resources.enter_context(VLALightRenderer(
                 args.vlalight_root, dataset_config, roadnet_path, frame_dir,
-                batch_size=args.render_batch_size,
+                batch_size=args.render_batch_size, keep_frames=args.keep_frames,
             ))
         else:
-            image_renderer = resources.enter_context(ImageRenderer(roadnet_path, frame_dir))
+            image_renderer = resources.enter_context(ImageRenderer(
+                roadnet_path, frame_dir, keep_frames=args.keep_frames,
+            ))
 
     class TeleportCounter:
         count = 0
@@ -726,6 +742,9 @@ def _run(args, resources):
                     actions, traces = controller.decide_images(
                         observations, image_paths, step, prompt=args.image_prompt
                     )
+                    # The uploads are done; drop frames beyond --keep_frames so a
+                    # full matrix cannot fill the volume with stale JPEGs.
+                    image_renderer.release()
                 else:
                     actions, traces = controller.decide(observations, step)
                 step_duration = args.duration
@@ -805,6 +824,7 @@ def _run(args, resources):
                 "teleport_count": teleport_counter.count,
                 "fallback_count": fallback_count,
                 "image_renderer": args.image_renderer if args.image_decisions else None,
+                "keep_frames": args.keep_frames if args.image_decisions else None,
                 "renderer_metadata": getattr(image_renderer, "metadata", None),
                 "agent_mode": agent_mode,
                 "jev_transport": None if args.dry_run else args.jev_transport,
