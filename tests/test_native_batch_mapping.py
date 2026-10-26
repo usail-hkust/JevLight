@@ -552,3 +552,48 @@ def test_agent_request_batch_uses_and_restores_native_path_microbatch():
     assert calls == [(2, 2), (2, 1)]
     assert engine.path_batch == 1
     assert [list(row['answers']) for row in outputs] == [list(row['questions']) for row in inputs]
+
+def test_open_prefix_cache_construction_and_branch_cloning():
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('transformers')
+    from transformers.cache_utils import DynamicCache, LinearAttentionLayer
+    from jevlight.backends.open_jev_prefix_batch import clone_batch_cache, new_prefix_cache
+
+    class Config:
+        model_type = 'qwen3_5_text'
+        layer_types = ['linear_attention', 'full_attention']
+        num_hidden_layers = 2
+        sliding_window = None
+        attention_chunk_size = None
+        num_kv_shared_layers = None
+        number_of_conv_states = 1
+        hidden_size = 4
+
+        def get_text_config(self, decoder=False):
+            return self
+
+    cache = new_prefix_cache(Config())
+    assert type(cache) is DynamicCache
+    assert isinstance(cache.layers[0], LinearAttentionLayer)
+
+    conv = torch.arange(4.0)
+    recurrent = torch.arange(3.0)
+    cache.layers[0].conv_states[0] = conv
+    cache.layers[0].recurrent_states[0] = recurrent
+    cache.layers[0].is_conv_states_initialized[0] = True
+    cache.layers[0].is_recurrent_states_initialized[0] = True
+    cache.layers[1].keys = torch.arange(6.0).reshape(1, 1, 2, 3)
+    cache.layers[1].values = torch.arange(6.0).reshape(1, 1, 2, 3) + 10
+
+    branch = clone_batch_cache(cache)
+    assert branch is not cache and branch.layers is not cache.layers
+    assert branch.layers[0] is not cache.layers[0]
+    assert branch.layers[0].conv_states is not cache.layers[0].conv_states
+    assert branch.layers[0].conv_states[0].data_ptr() != cache.layers[0].conv_states[0].data_ptr()
+    branch.layers[0].conv_states[0].add_(100)
+    assert not torch.equal(branch.layers[0].conv_states[0], cache.layers[0].conv_states[0])
+    assert torch.equal(cache.layers[0].conv_states[0], conv)
+    branch.layers[0].is_conv_states_initialized[0] = False
+    assert cache.layers[0].is_conv_states_initialized[0] is True
+    assert torch.equal(branch.layers[1].keys, cache.layers[1].keys)
+    assert branch.layers[1].keys.data_ptr() != cache.layers[1].keys.data_ptr()

@@ -150,16 +150,16 @@ def parallel_transfer(url, partial, size, workers=8):
     shutil.rmtree(chunks)
 
 
-def transfer(model_id, revision, entry, destination, modelscope_files=None):
+def transfer(model_id, revision, entry, destination, modelscope_files=None, range_workers=8):
     locks = ROOT / ".local/models/_cache/locks"
     locks.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(str((destination / entry["rfilename"]).resolve()).encode()).hexdigest()
     with (locks / lock_name).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _transfer(model_id, revision, entry, destination, modelscope_files)
+        return _transfer(model_id, revision, entry, destination, modelscope_files, range_workers)
 
 
-def _transfer(model_id, revision, entry, destination, modelscope_files=None):
+def _transfer(model_id, revision, entry, destination, modelscope_files=None, range_workers=8):
     name = entry["rfilename"]
     target = destination / name
     if not target.resolve().is_relative_to(destination.resolve()):
@@ -187,7 +187,7 @@ def _transfer(model_id, revision, entry, destination, modelscope_files=None):
                 offset = partial.stat().st_size if partial.exists() else 0
                 if expected_size and expected_size >= 128 * 1024**2 and not offset:
                     try:
-                        parallel_transfer(url, partial, expected_size)
+                        parallel_transfer(url, partial, expected_size, workers=range_workers)
                     except RangeUnsupported:
                         with get(url, stream=True, timeout=(20, 120)) as response:
                             response.raise_for_status()
@@ -225,11 +225,14 @@ def _transfer(model_id, revision, entry, destination, modelscope_files=None):
     raise RuntimeError(f"download failed: {model_id}/{name}: {'; '.join(errors)}")
 
 
-def snapshot(key, model_id, revision="main", base=False, workers=4):
+def snapshot(key, model_id, revision="main", base=False, workers=4, range_workers=8):
     model_root = ROOT / ".local/models"
     pinned = model_root / key / "manifest.json"
     if not base and pinned.exists():
-        revision = json.loads(pinned.read_text())["revision"]
+        previous = json.loads(pinned.read_text())
+        if previous['model_id'] != model_id or (revision != 'main' and previous['revision'] != revision):
+            raise ValueError('Existing snapshot differs from the requested frozen identity; preserve it separately')
+        revision = previous['revision']
     meta, source = metadata(model_id, revision)
     revision = meta["sha"]
     destination = (model_root / "_bases" / model_id.replace("/", "--") / revision
@@ -255,7 +258,7 @@ def snapshot(key, model_id, revision="main", base=False, workers=4):
     save(manifest_path, manifest)
     save(destination.parent / "repository_metadata.json" if not base else destination / "repository_metadata.json", meta)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        manifest["files"] = list(pool.map(lambda entry: transfer(model_id, revision, entry, destination, modelscope_files), files))
+        manifest["files"] = list(pool.map(lambda entry: transfer(model_id, revision, entry, destination, modelscope_files, range_workers), files))
     for config_path in destination.rglob("adapter_config.json"):
         config = json.loads(config_path.read_text())
         base_id = config.get("base_model_name_or_path")
@@ -279,11 +282,11 @@ def snapshot(key, model_id, revision="main", base=False, workers=4):
                             base_revision = provenance.get("revision")
                         if base_revision:
                             break
-            base_manifest = snapshot(base_id.replace("/", "--"), base_id, base_revision or "main", True, workers)
+            base_manifest = snapshot(base_id.replace("/", "--"), base_id, base_revision or "main", True, workers, range_workers)
             manifest["bases"].append({"model_id": base_id, "revision": base_manifest["revision"],
                                       "weights_path": base_manifest["weights_path"]})
     if key == "agent-jev":
-        base_manifest = snapshot("Qwen--Qwen3-0.6B", "Qwen/Qwen3-0.6B", "main", True, workers)
+        base_manifest = snapshot("Qwen--Qwen3-0.6B", "Qwen/Qwen3-0.6B", "main", True, workers, range_workers)
         manifest["bases"].append({"model_id": "Qwen/Qwen3-0.6B", "revision": base_manifest["revision"],
                                   "weights_path": base_manifest["weights_path"]})
     manifest.update(status="downloaded", finished_at=now())
@@ -295,9 +298,13 @@ def main(default_models=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", default=default_models, required=default_models is None)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--range-workers", type=int, default=8,
+                        help="Concurrent ranges per large file; lower to reduce shared I/O")
     parser.add_argument("--catalog", type=Path, default=CATALOG,
                         help="Frozen model catalog")
     args = parser.parse_args()
+    if args.workers < 1 or args.range_workers < 1:
+        parser.error("worker counts must be positive")
     catalog = json.loads(args.catalog.read_text())
     keys = model_keys(args.models, catalog)
     for key in keys:
@@ -309,7 +316,7 @@ def main(default_models=None):
         identity = catalog[key]
         report = {"model_key": key, "model_id": identity["model_id"], "started_at": now()}
         try:
-            manifest = snapshot(key, identity["model_id"], identity["revision"], workers=args.workers)
+            manifest = snapshot(key, identity["model_id"], identity["revision"], workers=args.workers, range_workers=args.range_workers)
             report.update(status="downloaded", revision=manifest["revision"])
         except Exception as error:
             failed = True

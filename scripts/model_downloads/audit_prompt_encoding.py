@@ -6,6 +6,7 @@ checks, not inference acceptance or traffic performance results.
 import argparse
 from copy import deepcopy
 import importlib
+import importlib.metadata
 import hashlib
 import json
 import os
@@ -22,6 +23,11 @@ os.environ['TRANSFORMERS_OFFLINE'] = '1'
 
 def cpu_runtime(config):
     import torch
+    torch.set_num_threads(1)
+    if config["family"] in ("d3", "pplx-decider"):
+        from jevlight.backends.structured_decision import D3Native, PplxDeciderNative
+        config = dict(config, weights_path=str(ROOT / config["weights_path"]))
+        return {"d3": D3Native, "pplx-decider": PplxDeciderNative}[config["family"]].for_encoding(config)
     from transformers import AutoTokenizer
     import jevlight.backends.decision_model_service as service
     torch.set_num_threads(1)
@@ -185,8 +191,11 @@ def main():
              for line in (output / mode / 'prompt_cases.jsonl').read_text().splitlines()]
     config = tomllib.loads((ROOT / 'config' / args.model / 'serving.toml').read_text())
     report = dict(model=args.model, family=config['family'], config=config, scope='native CPU encoding only; no model weights or GPU', cases=[])
+    report['environment'] = {'python': sys.version, 'executable': sys.executable,
+        'packages': {name: importlib.metadata.version(name) for name in ('torch', 'transformers', 'tokenizers')}}
     report['source_hashes'] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (ROOT / 'jevlight/controller.py', ROOT / 'jevlight/backends/decision_model_service.py',
+                     ROOT / 'jevlight/backends/structured_decision.py',
                      ROOT / 'scripts/model_downloads/audit_prompt_encoding.py',
                      ROOT / 'config' / args.model / 'serving.toml')}
     report['case_hashes'] = {mode: hashlib.sha256((output / mode / 'prompt_cases.jsonl').read_bytes()).hexdigest()
@@ -217,6 +226,7 @@ def main():
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(dict(model=args.model, status=report['status'], passed=sum(c['status']=='passed' for c in report['cases']),
                          reason=report.get('reason'), first_failure=next((c for c in report['cases'] if c['status']!='passed'),None)), ensure_ascii=False), flush=True)
+    raise SystemExit(0 if report['status'] == 'passed' and cases else 1)
 
 
 if __name__ == '__main__':

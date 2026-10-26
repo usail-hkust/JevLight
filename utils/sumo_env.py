@@ -2094,6 +2094,12 @@ class SUMOEnv:
             "--no-warnings", "true",
             # "--end", str(sim_time)
         ]
+        if self.dic_traffic_env_conf.get("CHECKPOINT_STATE_ENABLED", False):
+            # saveState omits RNG by default. Checkpoints also need pending
+            # demand from the unchanged original route file on reload.
+            sumo_cmd_base.extend(["--save-state.rng", "true",
+                                  "--save-state.precision", "16",
+                                  "--save-state.transportables", "true"])
 
         # Add --begin to start from a specific time (e.g., 28800 for 8 AM).
         # A loaded state already embeds its own (later) simulation time, so

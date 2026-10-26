@@ -33,6 +33,10 @@ class StepBatchClient(JevClient):
         self._pace()
         started = time.time()
         headers = {'Content-Type': 'application/json'}
+        identity = getattr(self, 'expected_service_identity', None)
+        if identity is not None:
+            headers['X-Jev-Service-Instance'] = identity['instance_id']
+            headers['X-Jev-Service-Fingerprint'] = identity['fingerprint']
         if self.api_key is not None:
             headers['Authorization'] = f'Bearer {self.api_key}'
         for attempt in range(self.max_retries + 1):
@@ -294,12 +298,51 @@ def prepare_step_backend(backend):
             enable_native_encoding_cache(runtime, family)
 
 
+def validate_shared_batch_config(config):
+    window = config.get('shared_batch_window_ms', 0)
+    if window != 0:
+        # The candidate's evaluate_batch flattens independent calls before
+        # native encoding and answer validation. A bad input can therefore
+        # fail a different simulator and change its existing retry/fallback
+        # outcome. Until the native interface can attribute these failures,
+        # keep each complete simulation step as its own batch. Reject the
+        # opt-in explicitly rather than silently changing the requested mode.
+        raise ValueError('cross-simulation coalescing is unavailable: native input '
+                         'and validation failures are not isolated; use '
+                         'shared_batch_window_ms=0 for independent complete-step batches')
+
+
 def make_step_server(backend, host, port, model_name):
+    validate_shared_batch_config(backend.config)
     prepare_step_backend(backend)
     server = make_legacy_step_server(backend, host, port, model_name)
     parent = server.RequestHandlerClass
 
     class ReportingHandler(parent):
+        def do_POST(self):
+            instance = self.headers.get('X-Jev-Service-Instance')
+            fingerprint = self.headers.get('X-Jev-Service-Fingerprint')
+            if instance is not None or fingerprint is not None:
+                identity = getattr(backend, 'service_identity', None)
+                if (identity is None or instance != identity['instance_id']
+                        or fingerprint != identity['fingerprint']):
+                    # Do not read or evaluate a request routed to a replaced
+                    # instance. Close the unread body rather than reusing it.
+                    self.close_connection = True
+                    self._send(409, {'error': {'message': 'Native service instance or identity changed'}})
+                    return
+            super().do_POST()
+
+        def do_GET(self):
+            if self.path == '/v1/service-identity':
+                identity = getattr(backend, 'service_identity', None)
+                if identity is None:
+                    self._send(503, {'error': {'message': 'Service identity was not qualified at startup'}})
+                else:
+                    self._send(200, identity)
+                return
+            super().do_GET()
+
         def _send(self, status, payload):
             if status >= 400 and isinstance(payload.get('error'), dict):
                 payload = dict(payload, error=dict(payload['error'], http_status=status))

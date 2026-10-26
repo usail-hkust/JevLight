@@ -12,6 +12,19 @@
 | 请求 | `max_workers=8, jev_retries=3, jev_timeout=120.0, jev_min_interval=0.0` |
 | 评估 | `rolling_evaluation=true, hourly_interval=3600, visualize=false, use_wandb=false` |
 
+## 调度
+
+- 4A800 当前为整节点 4 路张量并行、单实验串行（`mode: tp` + `tensor_parallel: 4`）；2A800 仍是两张卡并行。
+- `only_on` 可把某模型限定在指定节点（如 `startlux-27b` 只在 4A800），避免上下文/显存放不下的节点误接。
+
+
+
+- 按**单场条件**分配，不按机器或模型切分 scope。两个节点各跑一个 `scripts.experiments.global_queue` 进程，从共享 home 上的同一个 pending 池原子抢单；任何节点的任何一张卡都能接当前 backlog 里的任何一种模型。同一模型连续跑完再换模型，换模型的加载时间之外不应出现空卡。
+- 只要还有任何一个条件未完成，就不应让 GPU 空等；只有在 pending 为空时才允许空闲。每张卡的 worker 由 `gpu_idle_ctl.sh run` 包住，空闲时交还给 GPUIdle 占用。
+- 已完成记录是唯一真相；队列重启、节点重启或中断后按记录自动续跑，被中断的场次回到池里重跑（场次级原子性，不支持场内断点）。
+- 控制统一为共享控制文件：`pause`（跑完当前场次后停）、`resume`、`interrupt --target all|<模型>|<条件 id>`（立即中断单场）、`stop`。卡死看门狗按日志增长判定，连续失败的条件进 `blocked.json` 跳过，避免单场拖住整张卡。
+- 模型顺序、batch 上限与两个节点的 GPU/端口/环境见 `config/decision_models/global_queue.json`。
+
 ## 不变原则
 
 - **信息边界**：普通仅本路口当前信息，使用本地压力偏好以及正确的方向、等待时间和容量统计；Co 只增加直接上下游邻居当前状态，启发式排名仅供 Co 参考。两模式均逐路口输入（`packaging=per_intersection`），不输入历史或全网状态，`cojev_history_steps=0`。

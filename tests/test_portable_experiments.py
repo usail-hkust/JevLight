@@ -15,7 +15,10 @@ from scripts.experiments import model_experiments as workflow
 
 def test_catalog_matrix_preserves_protocol():
     catalog = json.loads((runner.ROOT / 'scripts/model_downloads/models.json').read_text())
-    assert len(catalog) == 21
+    # The catalog grows as models are registered; assert the families the
+    # benchmark matrix depends on rather than a frozen count.
+    assert len(catalog) >= 25
+    assert {'d3-flash', 'd3', 'pplx-decider-flash-v1.2', 'pplx-decider-v1.2'} <= catalog.keys()
     for key in catalog:
         rows = runner.matrix(key)
         assert len(rows) == len({runner.row_id(r) for r in rows}) == 42

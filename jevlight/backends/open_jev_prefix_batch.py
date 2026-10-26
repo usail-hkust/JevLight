@@ -3,28 +3,65 @@ import copy
 from types import MethodType
 
 
+def _clone_cache_state(value):
+    """Clone tensor or per-state tensor dictionaries without sharing storage."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {index: (tensor.clone() if tensor is not None else None)
+                for index, tensor in value.items()}
+    if hasattr(value, 'clone'):
+        return value.clone()
+    raise TypeError(f'Unreviewed native cache state: {type(value).__name__}')
+
+
 def clone_batch_cache(cache):
-    """Preserve author recurrent-state dtype and independent branch storage."""
+    """Preserve recurrent dtype and give each row independent branch storage.
+
+    Transformers 5.x stores linear-attention conv/recurrent state in dictionaries
+    keyed by state index, while full-attention layers keep key/value tensors.
+    Shallow-copying either container would alias in-place updates across the
+    four candidate branches.
+    """
     from transformers.cache_utils import DynamicCache, DynamicLayer, LinearAttentionLayer
-    from jev.prefix_cache import RecurrentDtypeLayer
     if type(cache) is not DynamicCache or cache.offloading:
         raise TypeError('Native prefix batch requires a resident DynamicCache')
     branch = copy.copy(cache)
     branch.layers = []
     for layer in cache.layers:
+        cloned = copy.copy(layer)
         if type(layer) is DynamicLayer:
-            fields = ('keys', 'values')
-        elif type(layer) in (LinearAttentionLayer, RecurrentDtypeLayer):
-            fields = ('conv_states', 'recurrent_states')
+            for name in ('keys', 'values'):
+                setattr(cloned, name, _clone_cache_state(getattr(layer, name)))
+        elif isinstance(layer, LinearAttentionLayer):
+            for name in ('conv_states', 'recurrent_states'):
+                setattr(cloned, name, _clone_cache_state(getattr(layer, name)))
+            # These flags are mutated in place by the next forward; sharing
+            # them would let one candidate mark another candidate's state as
+            # ready. conv_kernel_size is read-only after initialization.
+            for name in ('is_conv_states_initialized', 'is_recurrent_states_initialized',
+                         'has_previous_state'):
+                value = getattr(layer, name, None)
+                if isinstance(value, dict):
+                    setattr(cloned, name, dict(value))
         else:
             raise TypeError(f'Unreviewed native cache layer: {type(layer).__name__}')
-        cloned = copy.copy(layer)
-        for name in fields:
-            value = getattr(layer, name)
-            if value is not None:
-                setattr(cloned, name, value.clone())
         branch.layers.append(cloned)
     return branch
+
+
+def new_prefix_cache(config):
+    """Build the resident cache through the installed Transformers API.
+
+    The pinned author helper constructs RecurrentDtypeLayer(config), but in
+    Transformers 5.17 that positional argument means number_of_states and
+    raises TypeError: 'Qwen3_5TextConfig' object cannot be interpreted as an
+    integer. The native linear-attention layer already initializes recurrent
+    state with zeros_like, so it preserves the FP32 kernel output without the
+    wrapper. Keep this local so the pinned author source stays untouched.
+    """
+    from transformers.cache_utils import DynamicCache
+    return DynamicCache(config=config)
 
 
 def compile_paths(runtime, requests):
@@ -57,7 +94,6 @@ def compile_paths(runtime, requests):
 
 def score_prefix_rows(runtime, rows):
     import torch
-    from jev.prefix_cache import new_cache
     model = runtime.model
     core = model.backbone.get_base_model() if hasattr(model.backbone, 'get_base_model') else model.backbone
     if core.config.model_type != 'qwen3_5_text':
@@ -82,7 +118,7 @@ def score_prefix_rows(runtime, rows):
         positions[index, left:] = torch.arange(row['prefix'], device=device)
     # Left padding precedes the initially zero recurrent state. Real prefix
     # tails remain at the end, and each row keeps its native rotary positions.
-    cache = new_cache(core.config)
+    cache = new_prefix_cache(core.config)
     model.backbone(input_ids=ids, attention_mask=valid, position_ids=positions,
                    past_key_values=cache, use_cache=True, return_dict=True)
     scores = []

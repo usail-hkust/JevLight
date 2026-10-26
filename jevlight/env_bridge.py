@@ -25,6 +25,9 @@ class JevLightEnv:
         dic_traffic_env_conf: Dict[str, Any],
         dic_path: Dict[str, str],
         trafficflow: str,
+        *,
+        load_state_path: str | None = None,
+        start_time: int = 0,
     ):
         self.dic_agent_conf = dic_agent_conf
         self.dic_traffic_env_conf = dic_traffic_env_conf
@@ -39,7 +42,12 @@ class JevLightEnv:
             dic_traffic_env_conf=dic_traffic_env_conf,
             dic_path=dic_path,
         )
-        self.env.reset()
+        self.env._start_time = start_time
+        try:
+            self.env.reset(load_state_path=load_state_path)
+        except BaseException:
+            self.env.close()
+            raise
 
     @staticmethod
     def _path_check(dic_path: Dict[str, str]) -> None:

@@ -82,5 +82,55 @@
   "open-jev-27b": {
     "model_id": "ZefanCai/Open-Jev-27B-v1.1",
     "revision": "28cf73067d5b337860bbef3c85b8b82ba8730956"
+  },
+  "d3-flash": {
+    "model_id": "vllm-sr/d3-flash",
+    "revision": "8b35c853b90e777595ec36bacae820fe08ea077a",
+    "license": "apache-2.0"
+  },
+  "d3": {
+    "model_id": "vllm-sr/d3",
+    "revision": "225be8b1e2270becab69c5fe05b26f99cbbdd66b",
+    "license": "apache-2.0"
+  },
+  "pplx-decider-flash-v1.2": {
+    "model_id": "perplexity-ai/pplx-decider-flash-v1.2",
+    "revision": "6d771ad7b5ecff5e93b8fc7b90d4c5ccc341954d",
+    "license": "apache-2.0"
+  },
+  "pplx-decider-v1.2": {
+    "model_id": "perplexity-ai/pplx-decider-v1.2",
+    "revision": "225c913ddc8761a8264f04f64548e1f97e443eb3",
+    "license": "apache-2.0"
+  },
+  "startlux-0.8b": {
+    "model_id": "startlux-models/StartLux-Decision-v1.1-0.8B-Instant",
+    "revision": "6496ae641cc71b149ce9dad69bd97f2a44e7bf11",
+    "license": "apache-2.0",
+    "family": "startlux"
+  },
+  "startlux-2b": {
+    "model_id": "startlux-models/StartLux-Decision-v1.1-2B-Instant",
+    "revision": "f1e6cd147dda82c9ffa3e8e725d5c1f175566fb1",
+    "license": "apache-2.0",
+    "family": "startlux"
+  },
+  "startlux-4b": {
+    "model_id": "startlux-models/StartLux-Decision-v1.1-4B-Instant",
+    "revision": "416088f77cfce09633906a3675c7cd2e5dabcf10",
+    "license": "apache-2.0",
+    "family": "startlux"
+  },
+  "startlux-9b": {
+    "model_id": "startlux-models/StartLux-Decision-v1.1-9B-Instant",
+    "revision": "18a17f734966b213b2f00fa9c915e8b9af2a9b20",
+    "license": "apache-2.0",
+    "family": "startlux"
+  },
+  "startlux-27b": {
+    "model_id": "startlux-models/StartLux-Decision-v1.1-27B-Instant",
+    "revision": "32e7d35d74db615c4a059181efbf21c5421f3561",
+    "license": "apache-2.0",
+    "family": "startlux"
   }
 }

@@ -1,0 +1,8 @@
+model_id = "vllm-sr/d3"
+family = "d3"
+weights_path = ".local/models/d3/weights"
+max_length = 32768
+inference_engine = "author"
+batch_size = 196
+host = "127.0.0.1"
+port = 8123

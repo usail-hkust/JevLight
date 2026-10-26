@@ -102,7 +102,7 @@ class LevPoolingNative(PoolingNativeBase):
         with torch.inference_mode():
             values=self.pool(rows,lora=self.lora)
             if not self.adapter_verified:
-                self.released_adapter_tensors_verified=verify_adapter(self.model.backbone,self.codec_source);self.adapter_verified=True
+                self.released_adapter_tensors_verified=self.verify_lev_adapter(self.codec_source);self.adapter_verified=True
             cursor=0;results=[]
             for request,(prepared,group)in zip(requests,packed,strict=True):
                 logits=[]

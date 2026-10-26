@@ -1,0 +1,9 @@
+model_id = "startlux-models/StartLux-Decision-v1.1-0.8B-Instant"
+family = "startlux"
+weights_path = ".local/models/startlux-0.8b/weights"
+max_length = 65536
+batch_size = 64
+http_concurrency = 32
+gpu_memory_utilization = 0.85
+host = "127.0.0.1"
+port = 8123

@@ -6,9 +6,26 @@ import json
 from pathlib import Path
 
 if __package__:
-    from .download import CATALOG, ROOT, check_blob, digest, model_keys, save
+    from .download import CATALOG, ROOT, check_blob, digest, model_keys, save, selected
 else:
-    from download import CATALOG, ROOT, check_blob, digest, model_keys, save
+    from download import CATALOG, ROOT, check_blob, digest, model_keys, save, selected
+
+
+def validate_coverage(snapshot, metadata, key):
+    if metadata.get('id') != snapshot['model_id'] or metadata['sha'] != snapshot['revision']:
+        raise ValueError('Repository metadata identity differs')
+    expected = {e['rfilename'] for e in metadata['siblings'] if selected(e['rfilename'], key)}
+    actual = [item['path'] for item in snapshot['files']]
+    if len(actual) != len(set(actual)) or set(actual) != expected:
+        raise ValueError('Snapshot manifest does not cover the complete selected repository')
+    weights = Path(snapshot['weights_path'])
+    for name in expected:
+        if name.endswith('.safetensors.index.json'):
+            index = json.loads((weights / name).read_text())
+            for shard in set(index['weight_map'].values()):
+                target = str(Path(name).parent / shard)
+                if target not in expected or not (weights / target).is_file():
+                    raise ValueError(f'Missing indexed weight shard: {target}')
 
 
 def native_tokenizer_normalization(path, snapshot, item, entry):
@@ -54,7 +71,7 @@ def main():
         try:
             normalizations = []
             manifest = json.loads((ROOT / ".local/models" / key / "manifest.json").read_text())
-            if manifest["revision"] != catalog[key]["revision"]:
+            if manifest['model_id'] != catalog[key]['model_id'] or manifest["revision"] != catalog[key]["revision"]:
                 raise ValueError("checkpoint revision differs from frozen catalog")
             snapshots = [manifest] + [json.loads((Path(base["weights_path"]) / "manifest.json").read_text()) for base in manifest["bases"]]
             for snapshot in snapshots:
@@ -63,6 +80,7 @@ def main():
                 weights = Path(snapshot["weights_path"])
                 metadata_path = weights / "repository_metadata.json" if weights.parent.name == snapshot["model_id"].replace("/", "--") else weights.parent / "repository_metadata.json"
                 metadata = json.loads(metadata_path.read_text())
+                validate_coverage(snapshot, metadata, key if snapshot is manifest else snapshot['model_id'].replace('/', '--'))
                 if metadata["sha"] != snapshot["revision"]:
                     raise ValueError("repository metadata revision differs")
                 entries = {entry["rfilename"]: entry for entry in metadata["siblings"]}

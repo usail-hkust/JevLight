@@ -1,0 +1,8 @@
+model_id = "perplexity-ai/pplx-decider-flash-v1.2"
+family = "pplx-decider"
+weights_path = ".local/models/pplx-decider-flash-v1.2/weights"
+max_length = 32768
+inference_engine = "author"
+batch_size = 196
+host = "127.0.0.1"
+port = 8123

@@ -715,8 +715,18 @@ class NativeBackend:
         self.config = config
         self.lock = threading.Lock()
         self.reported_model = config["model_id"]
+        if config['family'] == 'startlux':
+            from jevlight.backends.startlux_runtime import StartLuxNative
+            self.runtime = StartLuxNative(config)
+            self.answer_validator = validate_answers
+            self.log_path = None
+            return
         prepare_native_cache(config)
-        if config['family'] == 'open-jev':
+        if config['family'] in ('d3', 'pplx-decider'):
+            from jevlight.backends.structured_decision import D3Native, PplxDeciderNative, validate_mapping
+            self.runtime = {'d3': D3Native, 'pplx-decider': PplxDeciderNative}[config['family']](config)
+            self.answer_validator = validate_mapping
+        elif config['family'] == 'open-jev':
             if config.get('inference_engine', 'author') == 'vllm_pooling':
                 from jevlight.backends.vllm_decision_runtime import OpenJevPoolingNative
                 self.runtime = OpenJevPoolingNative(config)

@@ -1,7 +1,7 @@
 """Shared guarded GPU pooling and progress for native decision runtimes."""
 import os
-import subprocess
 from pathlib import Path
+import uuid
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -18,14 +18,28 @@ class PoolingNativeBase:
         if options.get('enable_lora'):
             from jevlight.backends.vllm_lora import install_fp32_lora_linear
             install_fp32_lora_linear()
-        from transformers import AutoConfig
-        from vllm import LLM,ModelRegistry
+        from vllm import LLM
         from vllm.config import PoolerConfig
-        from vllm.transformers_utils.configs.qwen3_5 import Qwen3_5TextConfig,Qwen3_5Config
-        class ValenConfig(Qwen3_5Config):model_type='valen_qwen'
-        AutoConfig.register('qwen3_5_text',Qwen3_5TextConfig,exist_ok=True)
-        AutoConfig.register('valen_qwen',ValenConfig,exist_ok=True)
-        ModelRegistry.register_model(architecture,'jevlight.backends.marker_vllm_models:'+architecture)
+        from jevlight.backends.native_pooling_registry import (
+            NATIVE_POOLING_ARCHITECTURES, NATIVE_POOLING_WORKER,
+            register_native_pooling_models)
+        if architecture not in NATIVE_POOLING_ARCHITECTURES:
+            raise ValueError('Unqualified native pooling architecture')
+        parallel_size=config.get('engine_tensor_parallel_size',1)
+        if type(parallel_size) is not int or parallel_size < 1:
+            raise ValueError('Native tensor parallel size must be a positive integer')
+        if parallel_size > 1:
+            if config.get('native_pooling_tp_qualification') is not True:
+                raise ValueError('Native tensor parallelism requires explicit qualification mode')
+            if options.get('enable_lora'):
+                raise ValueError('Sharded native adapter verification is not qualified')
+            if torch.cuda.device_count() != parallel_size:
+                raise ValueError('Qualification requires exactly the selected worker devices')
+            options['distributed_executor_backend']='mp'
+        expected_uuids=[str(torch.cuda.get_device_properties(i).uuid) for i in range(parallel_size)]
+        if len(set(expected_uuids)) != parallel_size:
+            raise ValueError('Native workers require distinct device identities')
+        register_native_pooling_models()
         self.config=config;self.source=Path(source);self.task=task
         self.max_length=int(config.get('engine_max_length',config['max_length']))
         if self.max_length>config['max_length']:raise ValueError('Engine window exceeds the model window')
@@ -33,32 +47,74 @@ class PoolingNativeBase:
                 else PoolerConfig(task=task,tok_pooling_type='ALL',use_activation=False))
         self.engine=LLM(model=str(source),runner='pooling',convert='embed',
             hf_overrides={'architectures':[architecture]},pooler_config=pooler,skip_tokenizer_init=True,
-            dtype='bfloat16',tensor_parallel_size=1,max_model_len=self.max_length,
+            dtype='bfloat16',tensor_parallel_size=parallel_size,worker_cls=NATIVE_POOLING_WORKER,max_model_len=self.max_length,
             max_num_seqs=int(config.get('engine_max_sequences',196)),max_num_batched_tokens=int(config['engine_token_budget']),
             gpu_memory_utilization=float(config.get('engine_gpu_memory_utilization',.85)),
             enable_prefix_caching=False,enforce_eager=True,**options)
-        self.model=torch.nn.Module();self.model.backbone=self.engine.llm_engine.model_executor.driver_worker.model_runner.model
+        # Keep only author readout heads in the service. The engine backbone
+        # belongs to its worker and may not exist in this process.
+        self.model=torch.nn.Module()
         self.last_engine_forward_rows=[];self.engine_forward_evidence=[]
-        self.model.backbone.register_forward_hook(self._completed_forward,with_kwargs=True)
+        # Multi-worker execution is opt-in for qualification, never a default.
+        self.expected_worker_uuids=expected_uuids
+        self.worker_evidence_dir=(ROOT/'results/native_pooling'/uuid.uuid4().hex).resolve()
+        self.worker_evidence_dir.mkdir(parents=True,exist_ok=False)
 
-    def _completed_forward(self,module,args,kwargs,value):
-        import torch
-        from vllm.forward_context import get_forward_context
-        metadata=get_forward_context().attn_metadata;values=list(metadata.values())if isinstance(metadata,dict)else[metadata]
-        rows=max((int(v.query_start_loc.numel()-1)for v in values if getattr(v,'query_start_loc',None)is not None),default=0)
-        if rows<1:raise ValueError('Actual GPU sequence mapping is unavailable')
-        torch.cuda.synchronize();self.last_engine_forward_rows.append(rows)
-        self.engine_forward_evidence.append(dict(rows=rows,input_tokens=int(kwargs['input_ids'].numel())))
-        notify=getattr(getattr(self,'_step_progress',None),'notify',None)
-        if notify:notify()
+    def verify_lev_adapter(self, source):
+        # The current exact-tensor verifier qualifies unsharded adapters only.
+        # Do not silently apply it to a TP shard or trust driver-local weights.
+        if len(self.expected_worker_uuids) != 1:
+            raise ValueError('Sharded native adapter verification is not qualified')
+        reports=self.engine.collective_rpc('verify_lev_adapter',args=(str(source),))
+        if (len(reports)!=1 or reports[0].get('rank')!=0
+                or type(reports[0].get('tensor_count')) is not int
+                or reports[0]['tensor_count']<=0):
+            raise ValueError('Incomplete worker native adapter verification')
+        return reports[0]['tensor_count']
 
     def pool(self,rows,*,lora=None):
         from vllm import PoolingParams
         if any(not ids or len(ids)>self.max_length for ids in rows):
             raise ValueError('Complete native tokens exceed the verified engine window')
         self.last_engine_forward_rows.clear();self.engine_forward_evidence.clear()
-        values=self.engine.encode([dict(prompt_token_ids=ids)for ids in rows],
-            PoolingParams(task=self.task,use_activation=False),pooling_task=self.task,lora_request=lora,use_tqdm=False)
+        self.last_worker_memory=[]
+        from jevlight.backends.native_pooling_evidence import WorkerEvidence
+        step_id=uuid.uuid4().hex
+        self.last_worker_step_id=step_id
+        evidence=None
+        error=None
+        started=False
+        # Cleanup also runs for validation/encode failures. Never replace the
+        # original engine error with a secondary evidence/cleanup failure.
+        try:
+            armed=self.engine.collective_rpc('begin_native_step',args=(step_id,str(self.worker_evidence_dir)))
+            evidence=WorkerEvidence(armed,self.expected_worker_uuids,step_id,self.worker_evidence_dir,
+                notify=getattr(getattr(self,'_step_progress',None),'notify',None))
+            evidence.start();started=True
+            values=self.engine.encode([dict(prompt_token_ids=ids)for ids in rows],
+                PoolingParams(task=self.task,use_activation=False),pooling_task=self.task,lora_request=lora,use_tqdm=False)
+        except BaseException as failure:
+            error=failure
+            raise
+        finally:
+            cleanup_errors=[]
+            if started:
+                try:evidence.stop()
+                except BaseException as failure:cleanup_errors.append(failure)
+            try:
+                reports=self.engine.collective_rpc('finish_native_step',args=(step_id,))
+                self.last_worker_reports=reports
+                if evidence is not None and not cleanup_errors:evidence.finish(reports)
+            except BaseException as failure:cleanup_errors.append(failure)
+            if evidence is not None:
+                self.last_worker_memory=evidence.memory_summary()
+                self.last_engine_forward_rows[:]=[chunk[0]['rows'] for chunk in evidence.completed]
+                self.engine_forward_evidence[:]=[event for chunk in evidence.completed for event in chunk]
+            if cleanup_errors:
+                if error is not None:
+                    for failure in cleanup_errors:error.add_note(f'Worker evidence cleanup: {failure!r}')
+                else:
+                    raise cleanup_errors[0]
         if len(values)!=len(rows)or any(value.prompt_token_ids!=ids for value,ids in zip(values,rows,strict=True)):
             raise ValueError('The engine omitted tokens or changed native row mapping')
         if not self.last_engine_forward_rows:raise ValueError('No actual GPU execution')

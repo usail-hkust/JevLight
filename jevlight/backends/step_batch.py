@@ -8,6 +8,9 @@ from types import MethodType
 
 
 def _backbone(runtime):
+    probe = getattr(runtime, 'batch_probe_module', None)
+    if probe is not None:
+        return probe
     model = getattr(runtime, 'model', None)
     if model is None:
         model = getattr(getattr(runtime, 'agent', None), 'model', None)
@@ -57,14 +60,34 @@ def _try_group(runtime, group, cap):
         peak_reserved = torch.cuda.max_memory_reserved()
         margin = max(4096 * 1024**2, total * .1)
         free_lower = free - max(0, peak_reserved - reserved)
+        workers = None
+        if getattr(runtime, 'emits_gpu_chunk_progress', False) and hasattr(runtime, 'expected_worker_uuids'):
+            workers = getattr(runtime, 'last_worker_memory', None)
+            expected = runtime.expected_worker_uuids
+            normalize = lambda value: str(value).removeprefix('GPU-')
+            if (not workers or len(workers) != len(expected)
+                    or [w.get('rank') for w in workers] != list(range(len(expected)))
+                    or [normalize(w.get('gpu_uuid')) for w in workers] != list(map(normalize, expected))
+                    or any(w.get('step_id') != runtime.last_worker_step_id
+                           or not w.get('completed_chunks')
+                           or w.get('peak_free_lower_bound_bytes') is None for w in workers)):
+                raise RuntimeError('Missing current per-worker memory margin evidence')
+            free_lower = min(free_lower, *(w['peak_free_lower_bound_bytes'] for w in workers))
         evidence = dict(requests=len(group), capacity=cap, gpu_forward_rows=observed,
                         wall_ms=(time.monotonic()-started)*1000,
                         peak_allocated_mib=peak/1024**2, peak_reserved_mib=peak_reserved/1024**2,
                         peak_free_lower_bound_mib=free_lower/1024**2,
                         required_margin_mib=margin/1024**2)
+        if workers is not None:
+            evidence['worker_memory'] = [dict(w, required_margin_bytes=max(4096 * 1024**2, w['memory_total_bytes'] * .1)) for w in workers]
+            peak = max(peak, *(w['peak_allocated_bytes'] for w in workers))
+            peak_reserved = max(peak_reserved, *(w['peak_reserved_bytes'] for w in workers))
+            evidence.update(peak_allocated_mib=peak/1024**2, peak_reserved_mib=peak_reserved/1024**2)
         runtime.step_run_peak_allocated_mib=max(getattr(runtime,'step_run_peak_allocated_mib',0),peak/1024**2)
         runtime.step_run_peak_reserved_mib=max(getattr(runtime,'step_run_peak_reserved_mib',0),peak_reserved/1024**2)
-        if free_lower < margin:
+        if free_lower < margin or (workers is not None and any(
+                w['peak_free_lower_bound_bytes'] < max(4096 * 1024**2, w['memory_total_bytes'] * .1)
+                for w in workers)):
             return None, dict(evidence, status='insufficient_memory_margin')
         if len(result) != len(group):
             raise ValueError('native whole-step batch result count mismatch')

@@ -40,13 +40,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
 import copy
-import hashlib
+from contextlib import ExitStack
+import uuid
 import json
 import os
-import platform
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -73,7 +71,6 @@ from jevlight.controller import (
 )
 from jevlight.env_bridge import JevLightEnv
 from jevlight.evaluation_metrics import calculate_evaluation_metrics_from_env
-from jevlight.images import ImageRenderer
 from jevlight.jev_client import (
     DEFAULT_JEV_MODEL,
     DEFAULT_LOCAL_BASE_URL,
@@ -239,34 +236,6 @@ def parse_args(argv=None):
         help="Deterministic local answers for pipeline smoke tests (no API)",
     )
     parser.add_argument(
-        "--image_decisions",
-        action="store_true",
-        help=(
-            "Enable experimental direct image-to-phase decisions on official "
-            "TypeSafe. Select Three.js or VLALight cameras with --image_renderer."
-        ),
-    )
-    parser.add_argument(
-        "--image_prompt",
-        default=None,
-        help="Append task instructions to the direct image-to-phase prompt",
-    )
-    parser.add_argument("--image_renderer", choices=("threejs", "vlalight"), default="threejs")
-    parser.add_argument("--vlalight_root", default="logs/vlalight-source/VLALight",
-                        help="VLALight source directory containing TransSimHub")
-    parser.add_argument("--render_batch_size", type=int, default=4)
-    parser.add_argument(
-        "--keep_frames",
-        type=int,
-        default=None,
-        help=(
-            "Keep only the N most recent camera frames per junction (0 deletes "
-            "each frame once its decision completed); default keeps every frame"
-        ),
-    )
-    parser.add_argument("--fail_on_image_fallback", action="store_true",
-                        help="Stop an image benchmark after any fallback; preserve the trace")
-    parser.add_argument(
         "--dry_run",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -331,6 +300,11 @@ def parse_args(argv=None):
         default=False,
         help="Keep serving the final 3D state after the run until Ctrl-C",
     )
+    parser.add_argument('--checkpoint_every_steps', type=int, default=0,
+                        help='Save an atomic checkpoint every N completed steps; 0 disables')
+    parser.add_argument('--resume_from', default=None, help='Checkpoint directory to resume')
+    parser.add_argument('--archive_resume_tails', action='store_true',
+                        help='Preserve post-checkpoint outputs before restoring committed prefixes')
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument("--config")
     config_path = config_parser.parse_known_args(argv)[0].config
@@ -341,6 +315,10 @@ def parse_args(argv=None):
             parser.error(str(exc))
         parser.set_defaults(**defaults)
     args = parser.parse_args(argv)
+    if args.checkpoint_every_steps < 0:
+        parser.error('--checkpoint_every_steps must be nonnegative')
+    if args.archive_resume_tails and not args.resume_from:
+        parser.error('--archive_resume_tails requires --resume_from')
     if args.jev_batch_size < 0:
         parser.error('--jev_batch_size must be nonnegative')
     if args.jev_batch_size and args.jev_transport != 'local':
@@ -441,30 +419,21 @@ def build_configs(args, dataset_config, run_id):
     model_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in model_name)
     if model_name in {"", ".", ".."}:
         raise ValueError("model name must identify a results subdirectory")
-    memo_path = Path(args.memo)
-    if (
-        memo_path.is_absolute()
-        or not memo_path.parts
-        or any(part in {"", ".", ".."} for part in memo_path.parts)
-    ):
-        raise ValueError("memo must be a single directory name or safe relative path")
-    memo = str(memo_path)
-    # Keep the VLALight benchmark's historical records/ layout so its resume
-    # scanner can reuse completed seeds; portable model experiments use the
-    # upstream results/<model>/<memo>/<run> layout.
-    root_dir = "records" if (args.image_decisions or args.dry_run) else os.path.join("results", model_name)
-    result_dir = Path(root_dir, memo, run_id).as_posix()
-    if args.evaluation_output_dir and not args.image_decisions:
+    memo = args.memo
+    if Path(memo).name != memo or memo in {"", ".", ".."}:
+        raise ValueError("memo must be a single directory name")
+    result_dir = os.path.join("results", model_name, memo, run_id)
+    if args.evaluation_output_dir:
         output = Path(args.evaluation_output_dir).resolve()
         if not output.is_relative_to(Path("results").resolve()):
             raise ValueError("evaluation_output_dir must be inside results/")
     paths.update({
-        "PATH_TO_MODEL": Path(result_dir, "model").as_posix(),
+        "PATH_TO_MODEL": os.path.join(result_dir, "model"),
         "PATH_TO_WORK_DIRECTORY": result_dir,
-        "PATH_TO_DATA": Path(
+        "PATH_TO_DATA": os.path.join(
             "data", dataset_config["template"], str(dataset_config["road_net"])
-        ).as_posix(),
-        "PATH_TO_ERROR": Path(result_dir, "errors").as_posix(),
+        ),
+        "PATH_TO_ERROR": os.path.join(result_dir, "errors"),
     })
     return agent_config, env_config, paths
 
@@ -484,32 +453,16 @@ def build_wandb_group(dataset_config, env_config, traffic_file):
 
 
 def run(args):
+    # Release SUMO and output ownership on every exit, including interrupts.
     with ExitStack() as resources:
         return _run(args, resources)
 
 
 def _run(args, resources):
-    wall_started = time.perf_counter()
     if args.duration <= 5:
         raise ValueError("duration must be greater than the 5-second yellow time")
     if args.count <= 0:
         raise ValueError("count must be positive")
-    if args.image_decisions and args.dry_run:
-        raise ValueError("--image_decisions cannot be combined with --dry_run")
-    if args.image_decisions and args.jev_transport != "official":
-        raise ValueError("--image_decisions requires --jev_transport official")
-    if args.keep_frames is not None:
-        if not args.image_decisions:
-            raise ValueError("--keep_frames requires --image_decisions")
-        if args.keep_frames < 0:
-            raise ValueError("--keep_frames must be non-negative")
-    if args.image_decisions:
-        if args.packaging not in (None, "per_intersection") or args.fallback != "previous":
-            raise ValueError("image mode requires per_intersection packaging and previous fallback")
-        args.agent = "jevlight"
-        args.packaging = "per_intersection"
-        args.speculative = False
-        args.jev_model = args.jev_model or "jev-1.14.0"
 
     dataset_config = setup_dataset_config(args.dataset)
     if args.road_net:
@@ -561,7 +514,63 @@ def _run(args, resources):
 
     timestamp = time.strftime("%m_%d_%H_%M_%S")
     run_id = f"jevlight_{Path(args.traffic_file).stem}_{timestamp}_pid{os.getpid()}"
+    from jevlight.simulation_checkpoint import (
+        OutputLease, SimulationCheckpoint, checkpoint_manifest, file_identity, save_checkpoint,
+        runtime_identity,
+    )
+    checkpoint_enabled = bool(args.checkpoint_every_steps or args.resume_from)
+    service_identity = None
+    if checkpoint_enabled and args.dry_run:
+        raise ValueError('Checkpoint entrypoint requires a Jev model client')
+    if checkpoint_enabled and not args.mock_jev:
+        if args.jev_transport != 'local' or not args.jev_batch_size:
+            raise ValueError('Live checkpoint requires local complete-step batch transport')
+        from jevlight.service_identity import probe_service_identity, resume_identity
+        service_identity = probe_service_identity(args.jev_base_url, model=args.jev_model,
+                                                  timeout=args.jev_timeout, api_key=api_key)
+    if checkpoint_enabled and args.use_wandb:
+        raise ValueError('Checkpoint resume with W&B requires a qualified logger resume identity')
+    runtime = runtime_identity() if checkpoint_enabled else None
+    routing = checkpoint_manifest(args.resume_from)[1]['identity'] if args.resume_from else None
+    if routing:
+        run_id = routing['run_id']
+        if Path(run_id).name != run_id:
+            raise ValueError('Invalid checkpoint run ID')
     agent_config, env_config, paths = build_configs(args, dataset_config, run_id)
+    run_directory = Path(paths['PATH_TO_WORK_DIRECTORY']).resolve()
+    if not run_directory.is_relative_to(Path('results').resolve()):
+        raise ValueError('Run directory must be inside results/')
+    # Operational checkpoint flags do not alter the experiment definition.
+    identity = None
+    if checkpoint_enabled:
+        env_config['CHECKPOINT_STATE_ENABLED'] = True
+        parameters = {k: v for k, v in experiment_parameters(args).items()
+                      if k not in {'resume_from', 'archive_resume_tails', 'checkpoint_every_steps'}}
+        identity = {'parameters': parameters, 'run_id': run_id,
+                    'run_directory': str(run_directory),
+                    'backend': resume_identity(service_identity) if service_identity else 'mock-no-GPU',
+                    'runtime': runtime,
+                    'files': file_identity([traffic_path, roadnet_path, __file__,
+                        *Path('jevlight').rglob('*.py'), *Path('utils').rglob('*.py')])}
+        if routing and identity != routing:
+            raise ValueError('Checkpoint configuration/input/code identity mismatch')
+        if args.evaluation_output_dir and Path(args.evaluation_output_dir).resolve() != run_directory:
+            raise ValueError('Checkpoint rolling output must use the run directory')
+    lease = resources.enter_context(OutputLease(run_directory))
+    if args.evaluation_output_dir and Path(args.evaluation_output_dir).resolve() != run_directory:
+        resources.enter_context(OutputLease(args.evaluation_output_dir))
+    if (run_directory / 'summary.json').exists():
+        raise ValueError('Run already has a summary; preserve it and verify completion before resuming')
+    checkpoint = (SimulationCheckpoint(args.resume_from, identity=identity,
+                    output_lease=lease, archive_tails=args.archive_resume_tails)
+                  if args.resume_from else None)
+    if checkpoint:
+        # SUMO/intersection construction writes headers: isolate these writes
+        # until restoration validates the fresh process and all Python state.
+        startup = run_directory / '.resume-startups' / uuid.uuid4().hex
+        paths['PATH_TO_WORK_DIRECTORY'] = str(startup)
+        paths['PATH_TO_MODEL'] = str(startup / 'model')
+        paths['PATH_TO_ERROR'] = str(startup / 'errors')
 
     min_interval = args.jev_min_interval
     if min_interval is None:
@@ -575,7 +584,11 @@ def _run(args, resources):
         packaging = "none"
         controller = MaxPressureController(args.duration)
     else:
-        client = JevClient(
+        client_class = JevClient
+        if service_identity is not None:
+            from jevlight.step_batch_support import StepBatchClient
+            client_class = StepBatchClient
+        client = client_class(
             transport=args.jev_transport,
             model=(
                 (args.jev_model or DEFAULT_JEV_MODEL)
@@ -590,6 +603,8 @@ def _run(args, resources):
             mock=args.mock_jev,
             batch_size=args.jev_batch_size,
         )
+        if service_identity is not None:
+            client.expected_service_identity = service_identity
         controller = JevLightController(
             client,
             args.duration,
@@ -608,13 +623,15 @@ def _run(args, resources):
         env_config,
         paths,
         args.traffic_file,
+        load_state_path=str(checkpoint.sumo_path) if checkpoint else None,
+        start_time=args.start_time if checkpoint_enabled else 0,
     )
     env = simulator.env
-    resources.callback(env.end_engine)
+    resources.callback(env.close)
     (Path(paths["PATH_TO_WORK_DIRECTORY"]) / "experiment_config.json").write_text(
         json.dumps(experiment_parameters(args), indent=2), encoding="utf-8"
     )
-    if args.start_time:
+    if args.start_time and not checkpoint_enabled:
         simulator.reset_env_with_start_time(args.start_time)
 
     # 3D visualization attaches to THIS simulation (same traci connection):
@@ -622,28 +639,6 @@ def _run(args, resources):
     # play/pause/step buttons gate the loop between steps.
     viz_runtime: Optional[PassiveRuntime] = None
     viz_server = None
-    image_renderer = None
-    if args.image_decisions:
-        frame_dir = Path(paths["PATH_TO_WORK_DIRECTORY"]) / "vision_frames"
-        if args.image_renderer == "vlalight":
-            from jevlight.vlalight_images import VLALightRenderer
-            image_renderer = resources.enter_context(VLALightRenderer(
-                args.vlalight_root, dataset_config, roadnet_path, frame_dir,
-                batch_size=args.render_batch_size, keep_frames=args.keep_frames,
-            ))
-        else:
-            image_renderer = resources.enter_context(ImageRenderer(
-                roadnet_path, frame_dir, keep_frames=args.keep_frames,
-            ))
-
-    class TeleportCounter:
-        count = 0
-
-        def on_simulation_second(self, env):
-            self.count += env.traci_conn.simulation.getStartingTeleportNumber()
-
-    teleport_counter = TeleportCounter()
-    env.add_step_listener(teleport_counter)
     if args.visualize:
         viz_network = NetworkModel.load(roadnet_path)
         viz_conn = getattr(env, "traci_conn", None)
@@ -659,9 +654,6 @@ def _run(args, resources):
             host=args.viz_host,
             port=args.viz_port,
         )
-        resources.callback(viz_server.server_close)
-        resources.callback(viz_server.shutdown)
-        resources.callback(viz_runtime.close)
         if viz_conn:
             viz_runtime.publish(viz_conn)
         open_viz_page(viz_url)
@@ -689,11 +681,11 @@ def _run(args, resources):
             "final/queue_observation_step_count",
         ):
             logger.define_metric(metric_name, step_metric="final/checkpoint")
-    trace_path = Path(paths["PATH_TO_WORK_DIRECTORY"]) / "jev_decisions.jsonl"
+    trace_path = run_directory / "jev_decisions.jsonl"
     rolling_recorder = None
     if args.rolling_evaluation:
         rolling_recorder = RollingMetricRecorder(
-            args.evaluation_output_dir or paths["PATH_TO_WORK_DIRECTORY"],
+            args.evaluation_output_dir or run_directory,
             total_duration=args.count,
             hourly_interval=args.hourly_interval,
             logger=logger,
@@ -702,16 +694,14 @@ def _run(args, resources):
                 "agent_mode": agent_mode,
                 "jev_transport": None if args.dry_run else args.jev_transport,
                 "jev_model": None if args.dry_run else args.jev_model,
-                "jev_retry_limit": None if args.dry_run else args.jev_retries,
                 "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
                 "traffic_file": args.traffic_file,
-                "input_mode": "image" if args.image_decisions else "text",
-                "mock_jev": bool(args.mock_jev),
             },
         )
-        rolling_recorder.attach(env, evaluation_start_time=args.start_time)
+        if not checkpoint:
+            rolling_recorder.attach(env, evaluation_start_time=args.start_time)
     total_reward = 0.0
     current_time = float(env.get_current_time())
     evaluation_start_time = current_time
@@ -723,30 +713,30 @@ def _run(args, resources):
         max_steps = args.count // args.duration
     step = 0
     done = False
+    if checkpoint:
+        loop = checkpoint.restore_python(env=env, controller=controller, recorder=rolling_recorder)
+        step, total_reward, done, max_steps = (loop[k] for k in
+                                             ('step', 'total_reward', 'done', 'max_steps'))
+        evaluation_start_time = loop['evaluation_start_time']
+        simulation_end_time = loop['simulation_end_time']
+        for inter in env.list_intersection:
+            original = run_directory / Path(inter.log_file_path).name
+            if env_config.get('ENABLE_DETAILED_LOGGING', True):
+                if str(original) not in checkpoint.manifest['outputs']:
+                    raise ValueError('Checkpoint lacks committed intersection signal log')
+            inter.log_file_path = str(original)
     with trace_path.open("a", encoding="utf-8") as trace_file:
         with tqdm(
             total=max_steps * args.duration,
             desc="jevlight simulation",
             unit="s",
+            initial=step * args.duration,
         ) as progress:
             while not done and step < max_steps:
                 if viz_runtime is not None:
                     viz_runtime.wait_until_running()
                 observations = collect_observations(env)
-                if args.image_decisions:
-                    image_paths = image_renderer.capture(
-                        env.traci_conn,
-                        [observation.intersection_id for observation in observations],
-                        step,
-                    )
-                    actions, traces = controller.decide_images(
-                        observations, image_paths, step, prompt=args.image_prompt
-                    )
-                    # The uploads are done; drop frames beyond --keep_frames so a
-                    # full matrix cannot fill the volume with stale JPEGs.
-                    image_renderer.release()
-                else:
-                    actions, traces = controller.decide(observations, step)
+                actions, traces = controller.decide(observations, step)
                 step_duration = args.duration
                 if args.rolling_evaluation:
                     step_duration = min(
@@ -760,13 +750,20 @@ def _run(args, resources):
                 for trace in traces:
                     trace_file.write(json.dumps(trace, ensure_ascii=False) + "\n")
                 trace_file.flush()
-                if args.image_decisions and args.fail_on_image_fallback and any(
-                    trace.get("fallback") or trace.get("error") for trace in traces
-                ):
-                    raise RuntimeError("Image benchmark stopped after a failed/fallback decision; see decision trace")
                 current_time = float(env.get_current_time())
                 step += 1
                 progress.update(step_duration)
+                if args.checkpoint_every_steps and step % args.checkpoint_every_steps == 0:
+                    append_paths = [trace_path, *run_directory.glob('signal_*.txt')]
+                    window_path = run_directory / 'window_results.jsonl'
+                    if window_path.exists():
+                        append_paths.append(window_path)
+                    save_checkpoint(run_directory / 'checkpoints', env=env, controller=controller,
+                        recorder=rolling_recorder, identity=identity, append_paths=append_paths,
+                        loop={'step': step, 'total_reward': total_reward, 'done': done,
+                              'max_steps': max_steps, 'evaluation_start_time': evaluation_start_time,
+                              'simulation_end_time': simulation_end_time})
+                    print(f'[CHECKPOINT] step={step} directory={run_directory / "checkpoints"}', flush=True)
                 simulated_elapsed = current_time - evaluation_start_time
                 usage = controller.usage_summary()
                 print(
@@ -794,50 +791,19 @@ def _run(args, resources):
         })
         safe_wandb_log(logger, metrics)
     safe_wandb_finish(logger)
-    summary_path = Path(paths["PATH_TO_WORK_DIRECTORY"]) / "summary.json"
-    fallback_count = 0
-    with trace_path.open(encoding="utf-8") as traces:
-        for line in traces:
-            if line.strip():
-                fallback_count += bool(json.loads(line).get("fallback"))
-    try:
-        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-        dirty = bool(subprocess.check_output(["git", "diff", "HEAD", "--stat"], text=True).strip())
-    except (OSError, subprocess.CalledProcessError):
-        revision, dirty = None, None
+    summary_path = run_directory / "summary.json"
     summary_path.write_text(
         json.dumps(
             {
                 "run_id": run_id,
-                "dataset": args.dataset,
-                "traffic_file": args.traffic_file,
-                "seed": args.seed,
-                "requested_horizon_s": args.count,
-                "control_interval_s": args.duration,
-                "roadnet_sha256": hashlib.sha256(Path(roadnet_path).read_bytes()).hexdigest(),
-                "traffic_sha256": hashlib.sha256(Path(traffic_path).read_bytes()).hexdigest(),
-                "git_revision": revision,
-                "git_dirty": dirty,
-                "python_version": platform.python_version(),
-                "sumo_version": env.traci_conn.getVersion(),
-                "wall_time_s": time.perf_counter() - wall_started,
-                "teleport_count": teleport_counter.count,
-                "fallback_count": fallback_count,
-                "image_renderer": args.image_renderer if args.image_decisions else None,
-                "keep_frames": args.keep_frames if args.image_decisions else None,
-                "renderer_metadata": getattr(image_renderer, "metadata", None),
                 "agent_mode": agent_mode,
                 "jev_transport": None if args.dry_run else args.jev_transport,
                 "jev_model": None if args.dry_run else args.jev_model,
-                "jev_retry_limit": None if args.dry_run else args.jev_retries,
                 "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
                 "dry_run": bool(args.dry_run),
                 "visualize": bool(args.visualize),
-                "image_decisions": bool(args.image_decisions),
-                "input_mode": "image" if args.image_decisions else "text",
-                "mock_jev": bool(args.mock_jev),
                 **metrics,
                 "jev": controller.usage_summary(),
             },
@@ -852,7 +818,13 @@ def _run(args, resources):
                 time.sleep(0.5)
         except KeyboardInterrupt:
             pass
+    if viz_runtime is not None:
+        viz_runtime.close()
+    if viz_server is not None:
+        viz_server.shutdown()
+        viz_server.server_close()
     env.batch_log()
+    env.end_engine()
     print(json.dumps(metrics, indent=2))
     print(f"Decision log: {trace_path}")
     print(f"Summary: {summary_path}")

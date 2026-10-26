@@ -370,7 +370,7 @@ Four SUMO scenarios ship with the repo (selected with `--dataset`, traffic file 
 | `newyork` | 28×7 | 196 | real_double, real_triple |
 | `newyork_16x3` | 16×3 | 48 | real |
 
-MZW and Manhattan are not included; copy them from the upstream project's `data/` and register them in `jevlight/config.py` if needed. Published SUMO benchmark results are available on the project homepage, with data in `assets/benchmark.json`.
+MZW and Manhattan are not included; copy them from the upstream project's `data/` and register them in `jevlight/config.py` if needed. Published SUMO benchmark results are available on the project homepage, with data in `assets/benchmark.json`. That file is generated, not hand-edited: `python scripts/benchmark/build_benchmark.py --write` rebuilds it from the formal experiment records (mean and sample standard deviation across the three seeds, per traffic flow and mode).
 
 ## VLALight cameras + direct Jev decisions
 

@@ -6,8 +6,8 @@ import subprocess
 def prepare_cuda_device(*, required_version='12.8'):
     """Retain the engine ABI constraint and accept standard CUDA device selection.
 
-    UUID aliases are resolved before initialization for engines which require
-    numeric visibility. An explicit UUID is checked against the actual device.
+    UUID lists are resolved before initialization for engines which require
+    numeric visibility. Every UUID is checked in its requested logical order.
     Numeric indices and unset visibility retain CUDA's normal selection rules.
     """
     import torch
@@ -19,9 +19,12 @@ def prepare_cuda_device(*, required_version='12.8'):
     visible = os.environ.get('CUDA_VISIBLE_DEVICES')
     if visible is not None and (not visible.strip() or visible.strip() == '-1'):
         raise ValueError('The decision engine requires a visible CUDA device')
-    if visible and visible.startswith('GPU-'):
-        if ',' in visible:
-            raise ValueError('Select one GPU UUID per decision engine process')
+    selected = [item.strip() for item in visible.split(',')] if visible else []
+    if any(item.startswith('GPU-') for item in selected):
+        if not all(item.startswith('GPU-') for item in selected):
+            raise ValueError('Select CUDA devices with either UUIDs or indices, not a mixture')
+        if len(set(selected)) != len(selected):
+            raise ValueError('CUDA device UUIDs must be distinct')
         if torch.cuda.is_initialized():
             raise RuntimeError('Resolve UUID visibility before CUDA initialization')
         inventory = subprocess.check_output(
@@ -29,12 +32,13 @@ def prepare_cuda_device(*, required_version='12.8'):
         )
         indices = {uuid.strip(): index.strip() for index, uuid in
                    (line.split(',', 1) for line in inventory.splitlines())}
-        if visible not in indices:
+        if any(uuid not in indices for uuid in selected):
             raise ValueError('The selected GPU UUID is not present')
-        os.environ['CUDA_VISIBLE_DEVICES'] = indices[visible]
-        actual = 'GPU-' + str(torch.cuda.get_device_properties(0).uuid).removeprefix('GPU-')
-        if actual != visible:
-            raise RuntimeError('CUDA selected a different device than the requested UUID')
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(indices[uuid] for uuid in selected)
+        for logical_index, requested in enumerate(selected):
+            actual = 'GPU-' + str(torch.cuda.get_device_properties(logical_index).uuid).removeprefix('GPU-')
+            if actual != requested:
+                raise RuntimeError(f'CUDA device {logical_index} differs from the requested UUID')
 
 
 def configure_cpu_threads(default=4):
