@@ -1,0 +1,12 @@
+{
+  "baseline": "fixedtime",
+  "dataset": "jinan",
+  "traffic_file": "anon_3_4_jinan_real.rou.xml",
+  "memo": "smoke",
+  "count": 3600,
+  "duration": 15,
+  "seed": 1,
+  "fixed_time_splits": "15,15,15,15",
+  "rolling_evaluation": false,
+  "use_wandb": false
+}

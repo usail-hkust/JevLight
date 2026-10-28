@@ -1,0 +1,14 @@
+{
+  "baseline": "collmlight",
+  "dataset": "jinan",
+  "traffic_file": "anon_3_4_jinan_real.rou.xml",
+  "memo": "mock",
+  "count": 60,
+  "duration": 15,
+  "seed": 1,
+  "history_window": 5,
+  "communication_threshold": 0.0,
+  "mock_llm": true,
+  "max_workers": 8,
+  "use_wandb": false
+}

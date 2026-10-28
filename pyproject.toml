@@ -19,6 +19,18 @@ tracking = ["wandb>=0.19,<1.0"]
 preparation = [
     "tokenizers==0.22.2",
 ]
+# Baseline extras (baselines/): the generic OpenAI-compatible LLM client, the
+# TensorFlow RL models (CoLight/PressLight/MPLight/Attend/AdvancedDQN), and
+# the PyTorch CityLight MAPPO.  The heuristic baselines and the mock LLM path
+# need none of these.
+baselines-llm = ["openai>=1.52"]
+baselines-rl = ["tensorflow-cpu>=2.16"]
+baselines-rl-torch = ["torch>=2.2"]
+baselines = [
+    "openai>=1.52",
+    "tensorflow-cpu>=2.16",
+    "torch>=2.2",
+]
 
 [dependency-groups]
 dev = ["pytest"]

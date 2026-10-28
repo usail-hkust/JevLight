@@ -1,0 +1,11 @@
+{
+  "baseline": "colight",
+  "dataset": "jinan",
+  "traffic_file": "anon_3_4_jinan_real.rou.xml",
+  "memo": "eval",
+  "count": 3600,
+  "duration": 15,
+  "seed": 1,
+  "rolling_evaluation": false,
+  "use_wandb": false
+}

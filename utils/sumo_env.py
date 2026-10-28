@@ -1678,7 +1678,6 @@ class SUMOEnv:
         candidates = (
             self.dic_traffic_env_conf.get("SUMO_PORT"),
             self.dic_traffic_env_conf.get("TRACI_PORT"),
-            os.environ.get("EVOLVELIGHT_SUMO_PORT"),
         )
         for value in candidates:
             if value in (None, ""):

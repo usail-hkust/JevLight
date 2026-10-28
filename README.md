@@ -27,6 +27,7 @@ All models share the same controller and experiment entry point. Model-specific 
 
 ```
 run_jevlight.py            # experiment entry point (mirrors run_LLMLight.py)
+baselines/                 # baseline methods (own entry point, shared evaluation stack)
 jevlight/
   backends/              # native model adapters, inference engines and batch kernels
   controller.py            # JevLightController, state + question construction
@@ -350,7 +351,7 @@ uv run python run_jevlight.py --jev_transport local --count 900
 uv run python run_jevlight.py --agent jevlight --count 3600 --rolling_evaluation
 ```
 
-`--dry_run` swaps the controller for a classic **MaxPressure** agent: each intersection activates the phase whose lanes hold the most vehicles (queued + approaching — the same pressure the mock Jev scores), entirely local, zero Jev requests, no key or transport needed. Traces record the per-phase pressures, and `summary.json` carries `"dry_run": true` with zero Jev usage — a standalone baseline for a separately authorized later task. Model campaign queues neither run nor depend on MaxPressure.
+`--dry_run` swaps the controller for a classic **MaxPressure** agent: each intersection activates the phase whose lanes hold the most vehicles (queued + approaching — the same pressure the mock Jev scores), entirely local, zero Jev requests, no key or transport needed. Traces record the per-phase pressures, and `summary.json` carries `"dry_run": true` with zero Jev usage — a standalone baseline for a separately authorized later task. Model campaign queues neither run nor depend on MaxPressure. The `baselines/` package ships a second, formula-different MaxPressure variant (upstream-minus-downstream lane pressure) — see the [Baselines](#baselines) section for the distinction.
 
 Each run writes `results/<model>/<memo>/<run_id>/` (CLI-only runs default to `results/jev/JevLight/<run_id>/`):
 
@@ -358,6 +359,29 @@ Each run writes `results/<model>/<memo>/<run_id>/` (CLI-only runs default to `re
 - `summary.json` — final metrics + aggregate Jev usage stats
 - `experiment_config.json` — resolved experiment parameters, excluding API credentials
 - plus SUMO's own logs via `batch_log()`
+
+## Baselines
+
+The `baselines/` package runs classic baseline methods on JevLight's evaluation stack: **LLMLight** and **CoLLMLight** (LLM, inference-time control), **CoLight**, **PressLight**, **MPLight**, **AttendLight**, **AdvancedDQN** (TensorFlow RL), **CityLight** (PyTorch MAPPO), **MaxPressure** (strict lane-pressure formula), **Webster**, and **FixedTime**. They run through their own entry point, `python -m baselines.run_baseline`, which reuses the same `SUMOEnv`, observation collector, and metric computation unchanged and mirrors `run_jevlight.py`'s control loop (a drift-guard test pins the mirrored configuration to it). Results land in `results/<baseline>/<memo>/<run_id>/` with the same `summary.json` / `jev_decisions.jsonl` layout, so baseline numbers are directly comparable with Jev/CoJev runs; `run_jevlight.py` itself is not modified.
+
+```bash
+# Heuristic baselines (SUMO only, no decision model, no extra dependencies):
+uv run --extra sumo python -m baselines.run_baseline --baseline fixedtime --count 3600
+uv run --extra sumo python -m baselines.run_baseline --baseline maxpressure --count 3600
+uv run --extra sumo python -m baselines.run_baseline --baseline webster --count 3600
+
+# LLM baselines against a served checkpoint; the deterministic mock needs no server:
+uv run --extra sumo python -m baselines.run_baseline --baseline llmlight --mock_llm --count 60
+uv run --extra sumo python -m baselines.run_baseline --baseline collmlight --mock_llm --count 60
+
+# RL baselines: train first, then evaluate the checkpoint through the same flow:
+uv run --extra sumo --extra baselines-rl python -m baselines.rl.train \
+    --model Colight --dataset jinan --count 3600 --num_rounds 50
+uv run --extra sumo --extra baselines-rl python -m baselines.run_baseline \
+    --baseline colight --rl_checkpoint model/Colight/<traffic>_<ts> --count 3600
+```
+
+Shared arguments mirror `run_jevlight.py` (`--dataset`, `--traffic_file`, `--duration`, `--count`, `--seed`, `--eightphase`, `--rolling_evaluation`, …); experiment configs live in `baselines/config/<baseline>/<experiment>.json`. The runner supports neither `--visualize` nor checkpoint resume. Dependencies: the heuristic baselines need nothing beyond the core project, the generic LLM path needs the `baselines-llm` extra, the five TensorFlow RL models need `baselines-rl`, and CityLight needs `baselines-rl-torch` (an umbrella `baselines` extra installs all three). See [baselines/README.md](baselines/README.md) for the LLM endpoint configuration, RL checkpoint layout, and implementation notes — including the MaxPressure naming note: `run_jevlight.py --dry_run` groups under `results/maxpressure/` too, but scores own-lane queued + approaching vehicles, while the baseline scores upstream minus downstream queues.
 
 ## Datasets
 
