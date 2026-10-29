@@ -396,6 +396,22 @@ Four SUMO scenarios ship with the repo (selected with `--dataset`, traffic file 
 
 MZW and Manhattan are not included; copy them from the upstream project's `data/` and register them in `jevlight/config.py` if needed. Published SUMO benchmark results are available on the project homepage, with data in `assets/benchmark.json`. That file is generated, not hand-edited: `python scripts/benchmark/build_benchmark.py --write` rebuilds it from the formal experiment records (mean and sample standard deviation across the three seeds, per traffic flow and mode).
 
+The homepage also publishes a composite index over those results, plus a score-vs-compute plane. Both are derived, never hand-edited:
+
+```bash
+# 1) Serving telemetry, run where the experiment records live:
+python scripts/benchmark/collect_telemetry.py \
+    --records results/experiments/records \
+    --legacy-csv results/decision_models/2a800/experiment_records.csv \
+    --benchmark assets/benchmark.json --results-root results \
+    --out assets/telemetry.json
+
+# 2) Composite index + cost plane (writes assets/composite.json and .js):
+python scripts/benchmark/build_composite.py
+```
+
+`collect_telemetry.py` reads only aggregates out of each run's `jev_decisions.jsonl` (decision count, tokens, and the per-step maximum request latency), and can recover the runs behind a published aggregate by matching its metric fingerprint when a run directory has no record file. `build_composite.py` normalises every (scene, metric) cell with a log min-max across the whole published pool, averages the 21 cells into one score, and derives cost as serving time × GPUs held. Sources live in `assets/benchmark.json` and `assets/telemetry.json`; the page reads the generated files through `assets/composite.js`.
+
 ## VLALight cameras + direct Jev decisions
 
 `--image_renderer vlalight` reuses [VLALight](https://github.com/usail-hkust/VLALight)'s

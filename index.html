@@ -264,6 +264,89 @@
     .bench-number small { font-size: 9px; }
   }
 
+  /* ---------- composite index ---------- */
+  #index { scroll-margin-top: 88px; }
+  .ix-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 14px; margin-bottom: 18px; }
+  .ix-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 6px; }
+  .ix-panel-title { font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; }
+  .ix-panel-sub { color: var(--muted); font-size: 13px; margin-top: 3px; max-width: 640px; }
+  .ix-toggle { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; background: var(--bg-soft); }
+  .ix-toggle button {
+    border: 0; background: none; color: var(--muted); font: 600 12.5px var(--sans);
+    padding: 8px 15px; cursor: pointer; transition: background .15s ease, color .15s ease;
+  }
+  .ix-toggle button + button { border-left: 1px solid var(--border-strong); }
+  .ix-toggle button:hover { color: var(--text); }
+  .ix-toggle button[aria-pressed="true"], .ix-toggle button.on { background: rgba(61,220,132,0.14); color: var(--green); }
+  #index :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+  .ix-svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .ix-grid { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+  .ix-axis { stroke: rgba(255,255,255,0.2); stroke-width: 1; }
+  .ix-tick { fill: var(--faint); font: 11.5px var(--mono); }
+  .ix-axis-title { fill: var(--muted); font: 13px var(--sans); letter-spacing: 0.02em; }
+  .ix-bar { transition: opacity .15s ease, filter .15s ease; }
+  .ix-bar-track { fill: rgba(255,255,255,0.045); }
+  .ix-panel-axis-label { fill: var(--faint); font: 10px var(--mono); letter-spacing: 0.12em; }
+  .ix-bar-group { cursor: pointer; }
+  .ix-bar-group:hover .ix-bar, .ix-bar-group.is-active .ix-bar { filter: brightness(1.22); }
+  .ix-bar-value { fill: var(--text); font: 600 12px var(--mono); }
+  .ix-bar-label { fill: var(--muted); font: 13px var(--sans); }
+  .ix-bar-rank { fill: var(--faint); font: 10.5px var(--mono); }
+  .ix-bar-group:hover .ix-bar-label, .ix-bar-group.is-active .ix-bar-label { fill: var(--text); }
+  .ix-baseline { stroke: rgba(255,197,49,0.5); stroke-width: 1.2; stroke-dasharray: 5 4; }
+  .ix-baseline-label { fill: var(--amber); font: 600 11.5px var(--mono); }
+
+  .ix-plot-wrap { position: relative; }
+  .ix-quadrant { fill: rgba(61,220,132,0.055); stroke: rgba(61,220,132,0.16); stroke-dasharray: 4 5; }
+  .ix-quadrant-label { fill: rgba(61,220,132,0.62); font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+  .ix-quadrant-edge { stroke: rgba(255,255,255,0.13); stroke-width: 1; stroke-dasharray: 2 4; }
+  .ix-grid-faint { stroke: rgba(255,255,255,0.035); }
+  .ix-frontier { fill: none; stroke: var(--green); stroke-width: 1.6; stroke-dasharray: 4 4; opacity: .62; }
+  .ix-point { stroke: rgba(10,14,19,0.9); stroke-width: 1.4; transition: opacity .15s ease; }
+  .ix-point-halo { fill: rgba(61,220,132,0.14); stroke: rgba(61,220,132,0.38); }
+  .ix-point-group { cursor: pointer; }
+  .ix-point-group:hover .ix-point, .ix-point-group.is-active .ix-point { stroke: #fff; stroke-width: 2; }
+  .ix-point-label { fill: var(--text); font: 12.5px var(--sans); pointer-events: none; paint-order: stroke; stroke: rgba(10,14,19,0.9); stroke-width: 3; stroke-linejoin: round; }
+  .ix-label-leader { stroke: rgba(255,255,255,0.22); stroke-width: 1; }
+  .ix-label-bg { fill: rgba(10,14,19,0.82); }
+  .ix-point-group:hover ~ .ix-label-bg, .ix-point-group.is-active ~ .ix-label-bg { fill: rgba(10,14,19,0.95); }
+  .ix-plot-note { color: var(--faint); font-size: 11.5px; margin: 2px 0 8px 8px; }
+
+  #ix-tooltip {
+    position: fixed; top: 0; left: 0; z-index: 80; pointer-events: none; opacity: 0;
+    transition: opacity .12s ease; background: rgba(9,13,18,0.97); border: 1px solid var(--border-strong);
+    border-radius: 10px; padding: 10px 13px; min-width: 180px; max-width: 280px;
+    box-shadow: 0 16px 44px rgba(0,0,0,0.6); font-size: 12px;
+  }
+  #ix-tooltip.on { opacity: 1; }
+  #ix-tooltip b { display: block; font-size: 13px; margin-bottom: 2px; }
+  #ix-tooltip .ix-tip-mode { color: var(--faint); font-size: 11px; font-family: var(--mono); }
+  #ix-tooltip dl { margin: 7px 0 0; display: grid; gap: 3px; }
+  #ix-tooltip dl div { display: flex; justify-content: space-between; gap: 14px; }
+  #ix-tooltip dt { color: var(--muted); }
+  #ix-tooltip dd { font-family: var(--mono); color: var(--text); }
+  #ix-tooltip .ix-tip-flag { display: inline-block; margin-top: 8px; color: var(--green); font: 600 10.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+
+  .ix-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+  .ix-scroll .ix-svg { min-width: 0; }
+
+  .ix-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 2px; }
+  .ix-legend-item { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+  .ix-legend-item i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .ix-method { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px; margin-top: 4px; }
+  .ix-method-block { color: var(--muted); font-size: 12.5px; line-height: 1.78; }
+  .ix-method-title { color: var(--text); font: 650 12px var(--sans); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 8px; }
+  .ix-method p + p { margin-top: 9px; }
+  .ix-method code { color: var(--amber); font: 12px var(--mono); }
+  .ix-method-data { color: var(--faint); font-size: 11.5px; }
+
+  @media (max-width: 860px) {
+    .ix-method { grid-template-columns: 1fr; gap: 18px; }
+    .ix-panel { padding: 18px 14px 10px; }
+    .ix-scroll .ix-svg { min-width: 760px; }
+  }
+
   /* ---------- quickstart ---------- */
   .qs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .qs-note { color: var(--muted); font-size: 13px; line-height: 1.8; margin-top: 18px; }
@@ -341,6 +424,7 @@
       <a href="#mapping">How it works</a>
       <a href="#features">Features</a>
       <a href="#benchmarks">Benchmarks</a>
+      <a href="#index">Index</a>
       <a href="#quickstart">Quick start</a>
       <a class="nav-cta" href="https://github.com/usail-hkust/JevLight" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -521,6 +605,77 @@
   <noscript><p class="bench-footnote">Enable JavaScript to view the benchmark tables.</p></noscript>
 </section>
 
+<section id="index" aria-labelledby="index-title">
+  <div class="sec-head reveal">
+    <div class="sec-tag">Composite index</div>
+    <h2 id="index-title">One score, every scene, at what cost</h2>
+    <p class="sec-desc">
+      Seven SUMO scenes × three traffic metrics, each normalised on its own scale and averaged into a single
+      index where higher is better — then plotted against the compute each model actually burned to finish a task.
+    </p>
+  </div>
+
+  <div class="ix-panel reveal">
+    <div class="ix-panel-head">
+      <div>
+        <div class="ix-panel-title">Composite score</div>
+        <div class="ix-panel-sub">Mean of the {cells} per-scene, per-metric scores ({scenes} flows × ATT / AWT / AQL). The dashed line is the rule-based baseline, scored on the same scale.</div>
+      </div>
+      <div class="ix-toggle" role="group" aria-label="Ranking mode" data-scope="bar">
+        <button type="button" data-mode="cojevlight" aria-pressed="true">CoJevLight</button>
+        <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+      </div>
+    </div>
+    <div class="ix-scroll"><div id="ix-bar"></div></div>
+  </div>
+
+  <div class="ix-panel reveal">
+    <div class="ix-panel-head">
+      <div>
+        <div class="ix-panel-title">Index vs. compute per task</div>
+        <div class="ix-panel-sub">Up and to the left is better. The dashed step is the Pareto frontier: no configuration on this plane is both cheaper and higher scoring.</div>
+      </div>
+      <div class="ix-toggle" role="group" aria-label="Configurations shown" data-scope="scatter">
+        <button type="button" data-mode="both" aria-pressed="true">Both</button>
+        <button type="button" data-mode="cojevlight" aria-pressed="false">CoJevLight</button>
+        <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+      </div>
+    </div>
+    <div class="ix-scroll"><div id="ix-scatter"></div></div>
+    <div class="ix-legend" id="ix-legend"></div>
+  </div>
+
+  <div class="ix-method reveal" id="ix-method">
+    <div class="ix-method-block">
+      <div class="ix-method-title">How the score is computed</div>
+      <p>Each of the {cells} cells — one scene, one metric — is normalised on its own log scale over every published
+      configuration: <code>100 · (ln hi − ln x) / (ln hi − ln lo)</code>, where <code>lo</code> is the best and
+      <code>hi</code> the worst value observed in that cell. Lower is better for ATT, AWT and AQL, so the best
+      observation scores 100 and the worst scores 0. A configuration's index is the unweighted mean of its
+      {cells} cells, which weights every scene and every metric equally.</p>
+      <p>The order is not an artefact of those choices. Trimming the worst decile from the bounds, swapping
+      log for linear scaling, or reweighting the metrics to 50 / 30 / 20 keeps the same top ten
+      (Spearman ρ ≥ 0.985 against the published order). It only starts to bend when all weight is pushed onto a
+      single metric — ρ ≥ 0.97 within a mode — which is expected, since ATT / AWT / AQL measure the same
+      congestion. The absolute number is relative to this pool: adding or removing a configuration moves the
+      bounds. Seed noise is small next to that, a median relative standard deviation of about 1% over the three
+      seeds.</p>
+    </div>
+    <div class="ix-method-block">
+      <div class="ix-method-title">How cost is computed</div>
+      <p>Serving time per task is the sum over the 240 control steps of the slowest request in that step — time the
+      model spent answering, with simulator time excluded. Multiplying by the GPUs the run held gives
+      GPU-seconds; each scene takes the median over its three seeds, and the seven scenes are then averaged,
+      matching the equal-scene weighting of the score. Hosted APIs are ranked but kept off the plane, because
+      their hardware is not ours to measure.</p>
+      <p class="ix-method-data">Data: {configurations} configurations per mode over {scenes} scenes, three seeds each,
+      for {runs} runs of serving telemetry. Sources: <code>assets/benchmark.json</code> and
+      <code>assets/telemetry.json</code>; the page reads the generated <code>assets/composite.js</code>.</p>
+    </div>
+  </div>
+  <noscript><p class="bench-footnote">Enable JavaScript to view the composite index.</p></noscript>
+</section>
+
 <section id="quickstart">
   <div class="sec-head reveal">
     <div class="sec-tag">Quick start</div>
@@ -617,7 +772,11 @@ uv run --locked --extra sumo python run_jevlight.py \
   </div>
 </footer>
 
+<div id="ix-tooltip" role="tooltip" aria-hidden="true"></div>
+
 <script src="assets/benchmark.js" defer></script>
+<script src="assets/composite.js" defer></script>
+<script src="assets/composite-chart.js" defer></script>
 <script>
   // ----- reveal on scroll -----
   const io = new IntersectionObserver(entries => {
