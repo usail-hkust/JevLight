@@ -14,7 +14,6 @@
   const tip = document.getElementById('ix-tooltip');
 
   function refreshHosts() {
-    // fillPlaceholders() rewrites the section, so hosts are looked up again.
     barHost = document.getElementById('ix-bar');
     scatterHost = document.getElementById('ix-scatter');
     legend = document.getElementById('ix-legend');
@@ -409,8 +408,16 @@
       configurations: String(data.configs.length / data.modes.length),
       runs: int(data.source.telemetry_runs)
     };
-    section.innerHTML = section.innerHTML.replace(/\{(\w+)\}/g, (match, key) =>
-      Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match);
+    // Edit text nodes in place: rewriting section.innerHTML would drop the
+    // .reveal observers bound by the page and leave the copy invisible.
+    const walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const filled = node.nodeValue.replace(/\{(\w+)\}/g, (match, key) =>
+        Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match);
+      if (filled !== node.nodeValue) node.nodeValue = filled;
+    }
     refreshHosts();
   }
 

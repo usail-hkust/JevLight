@@ -202,3 +202,19 @@ def test_ranking_survives_alternative_weightings(composite):
             ids = [c['id'] for c in configs if c['mode'] == mode]
             rho = spearman({k: base_ranks[k] for k in ids}, {k: variant[k] for k in ids})
             assert rho >= 0.95, (metric, mode, rho)
+
+
+def test_placeholders_are_filled_without_rebuilding_the_section():
+    """The page never rebuilds #index: its .reveal nodes are already observed.
+
+    Rewriting section.innerHTML detached the nodes the page's IntersectionObserver
+    was watching, so the copy stayed at opacity 0 and left a blank gap above
+    Quick start.
+    """
+    import re
+
+    script = (ROOT / 'assets/composite-chart.js').read_text(encoding='utf-8')
+    body = script.split('function fillPlaceholders()', 1)[1].split('\n  }', 1)[0]
+    body = re.sub(r'/\*.*?\*/|//[^\n]*', '', body, flags=re.S)
+    assert not re.search(r'section\.innerHTML\s*=', body)
+    assert 'nodeValue' in body
