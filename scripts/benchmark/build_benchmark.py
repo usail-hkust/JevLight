@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RECORDS = ROOT / 'results/experiments/records'
 LEGACY_CSV = ROOT / 'results/decision_models/2a800/experiment_records.csv'
 BENCHMARK = ROOT / 'assets/benchmark.json'
+BASELINES = ROOT / 'assets/baselines.json'
 
 METRICS = ('att', 'awt', 'aql')
 
@@ -130,6 +131,25 @@ def published_runs(runs):
     return out
 
 
+def load_baselines():
+    """Aggregates for the traditional baselines, published by export_baselines.py.
+
+    They are kept as mode ``baseline`` so they never enter the JevLight /
+    CoJevLight table, but they are scored on the same per-(flow, metric) columns
+    as the decision models.
+    """
+    if not BASELINES.is_file():
+        return [], []
+    document = json.loads(BASELINES.read_text())
+    aggregates = []
+    for entry in document.get('aggregates', []):
+        aggregates.append(dict(model=entry['model'], flow=entry['flow'], mode='baseline',
+                               seeds=entry['seeds'], n=entry['n'], metrics=entry['metrics']))
+    models = [dict(id=m['id'], name=m['name'], kind='baseline')
+              for m in document.get('models', [])]
+    return aggregates, models
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--write', action='store_true', help='replace assets/benchmark.json')
@@ -140,26 +160,32 @@ def main():
     runs = load_runs()
     new_models = {r['model'] for r in runs}
     newest = aggregate(runs)
+    baseline_aggregates, baseline_models = load_baselines()
+    baselined = {m['id'] for m in baseline_models}
 
     # Keep published models that this checkout has no results for: their numbers
     # came from elsewhere and must not silently disappear from the page.
     new_keys = {(a['model'], a['flow'], a['mode']) for a in newest}
+    new_keys |= {(a['model'], a['flow'], a['mode']) for a in baseline_aggregates}
     kept = [a for a in existing.get('aggregates', [])
             if (a['model'], a['flow'], a['mode']) not in new_keys]
 
     names = display_names()
     models = []
-    for model in sorted(new_models | {a['model'] for a in kept}):
+    for model in sorted(new_models | {a['model'] for a in kept} | baselined):
         previous = next((m for m in existing.get('models', []) if m['id'] == model), None)
         models.append(dict(id=model,
                            name=(previous or {}).get('name') or names.get(model)
                                 or NAME_OVERRIDES.get(model) or default_name(model),
-                           kind=(previous or {}).get('kind', 'native')))
+                           kind='baseline' if model in baselined
+                                else (previous or {}).get('kind', 'native')))
 
-    aggregates = sorted(newest + kept, key=lambda a: (a['model'], a['flow'], a['mode']))
+    aggregates = sorted(newest + baseline_aggregates + kept,
+                        key=lambda a: (a['model'], a['flow'], a['mode']))
     published = published_runs([r for r in runs if r['source'] == 'record'])
 
     print('records aggregated : %d runs' % len(runs))
+    print('baseline groups    : %d (%d models)' % (len(baseline_aggregates), len(baseline_models)))
     print('models             : %d published, %d from this checkout' % (len(models), len(new_models)))
     print('aggregate groups   : %d rebuilt + %d kept = %d' % (len(newest), len(kept), len(aggregates)))
     if args.summary_only:

@@ -19,12 +19,13 @@
     legend = document.getElementById('ix-legend');
   }
 
-  const state = { barMode: 'cojevlight', scatterMode: 'both', active: null };
+  const state = { barMode: 'cojevlight', scatterMode: 'all', active: null };
   const registry = new Map();          // config id -> [elements]
   const fmt = (v, digits = 1) =>
     v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const int = v => (v == null ? '—' : v.toLocaleString('en-US'));
-  const modeLabel = id => (id === 'cojevlight' ? 'CoJevLight' : 'JevLight');
+  const modeLabel = id => id === 'cojevlight' ? 'CoJevLight'
+    : id === 'baseline' ? 'Traditional' : 'JevLight';
 
   function el(tag, attrs = {}, text) {
     const node = document.createElementNS(NS, tag);
@@ -79,8 +80,16 @@
     const cost = config.cost;
     const rows = [
       `<div><dt>Index</dt><dd>${fmt(config.score)}</dd></div>`,
-      `<div><dt>Rank</dt><dd>${config.rank} / ${data.configs.length}</dd></div>`
+      `<div><dt>Rank</dt><dd>${config.rank} / ${config.mode === 'baseline' ? (data.traditional || []).length : data.configs.length}</dd></div>`
     ];
+    if (config.mode === 'baseline') {
+      if (config.cost && config.cost.gpu_seconds) {
+        rows.push(`<div><dt>Compute / task</dt><dd>${int(config.cost.gpu_seconds)} GPU·s</dd></div>`);
+        rows.push(`<div><dt>Wall clock / task</dt><dd>${int(config.cost.wall_seconds)} s</dd></div>`);
+      }
+      return `<b>${config.name}</b><span class="ix-tip-mode">Traditional · rule or RL baseline</span>`
+        + `<dl>${rows.join('')}</dl>`;
+    }
     if (config.hosted) {
       rows.push('<div><dt>Compute</dt><dd>hosted API</dd></div>');
     } else if (cost.gpu_seconds) {
@@ -102,7 +111,18 @@
   function renderBars() {
     if (!barHost) return;
     barHost.innerHTML = '';
-    const configs = data.configs.filter(c => c.mode === state.barMode);
+    const traditional = (data.traditional || []).map(b => ({
+      ...b, color: '#8a99a8', mode: 'baseline', family_label: 'Traditional'}));
+    let configs;
+    if (state.barMode === 'baseline') {
+      configs = traditional;
+    } else if (state.barMode === 'all') {
+      // Every published configuration on one scale: both decision-model modes
+      // plus the traditional controllers, ranked together.
+      configs = [...data.configs, ...traditional].sort((a, b) => b.score - a.score);
+    } else {
+      configs = data.configs.filter(c => c.mode === state.barMode);
+    }
     const height = BAR.top + configs.length * BAR.row + BAR.bottom;
     const svg = svgRoot(BAR.w, height, 'ix-svg ix-svg-bars');
     const x0 = BAR.label;
@@ -127,6 +147,12 @@
       x: valueX, y: BAR.top - 22, class: 'ix-panel-axis-label', 'text-anchor': 'end'
     }, 'SCORE'));
 
+    // In All the same model appears under both observation scopes and the
+    // traditional controllers share the axis, so label each row with its class.
+    const barLabel = config => state.barMode !== 'all' ? config.name
+      : config.mode === 'baseline' ? `${config.name} (Trad.)`
+      : config.mode === 'cojevlight' ? `${config.name} (Co)` : config.name;
+
     const barH = 13;
     configs.forEach((config, index) => {
       const cy = BAR.top + index * BAR.row + BAR.row / 2;
@@ -141,7 +167,7 @@
       }, String(index + 1).padStart(2, '0')));
       group.appendChild(el('text', {
         x: x0 - 16, y: cy + 4.2, class: 'ix-bar-label', 'text-anchor': 'end'
-      }, config.name));
+      }, barLabel(config)));
       group.appendChild(el('rect', {
         x: x0, y: cy - barH / 2, width, height: barH, rx: 3,
         fill: config.color, class: 'ix-bar'
@@ -190,12 +216,20 @@
   }
 
   function scatterPoints() {
-    return data.configs.filter(c => !c.hosted && c.cost.gpu_seconds
-      && (state.scatterMode === 'both' || c.mode === state.scatterMode));
+    const traditional = (data.traditional || []).map(b => ({
+      ...b, color: '#8a99a8', mode: 'baseline', family_label: 'Traditional'}));
+    const pool = state.scatterMode === 'all'
+      ? [...data.configs, ...traditional]
+      : state.scatterMode === 'baseline'
+        ? traditional
+        : data.configs.filter(c => c.mode === state.scatterMode);
+    return pool.filter(c => !c.hosted && c.cost && c.cost.gpu_seconds);
   }
 
   function pointLabel(config) {
-    return state.scatterMode === 'both' && config.mode === 'cojevlight'
+    const both = state.scatterMode === 'all' || state.scatterMode === 'baseline';
+    if (config.mode === 'baseline') return `${config.name} (Trad.)`;
+    return both && config.mode === 'cojevlight'
       ? `${config.name} (Co)` : config.name;
   }
 
@@ -203,7 +237,7 @@
     if (!scatterHost) return;
     scatterHost.innerHTML = '';
     const points = scatterPoints();
-    const both = state.scatterMode === 'both';
+    const both = state.scatterMode === 'all' || state.scatterMode === 'baseline';
     const outer = html('div', { class: 'ix-plot-wrap' });
     const svg = svgRoot(SC.w, SC.h, 'ix-svg ix-svg-scatter');
     const innerW = SC.w - SC.l - SC.r;
@@ -372,8 +406,8 @@
 
     const notes = [];
     if (both) {
-      notes.push('Both modes are shown: a plain name is JevLight, “(Co)” is CoJevLight — the same model under '
-        + 'the two observation scopes, drawn with a second ring.');
+      notes.push('All configurations are shown: a plain name is JevLight, “(Co)” is CoJevLight — the same model '
+        + 'under the two observation scopes, drawn with a second ring — and “(Trad.)” is a traditional controller.');
     }
     const hosted = data.configs.filter(c => c.hosted);
     if (hosted.length) {

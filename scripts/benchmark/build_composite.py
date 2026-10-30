@@ -33,6 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK = ROOT / 'assets/benchmark.json'
 TELEMETRY = ROOT / 'assets/telemetry.json'
+BASELINES = ROOT / 'assets/baselines.json'
 OUT = ROOT / 'assets/composite.json'
 
 METRICS = ('att', 'awt', 'aql')
@@ -47,6 +48,9 @@ NAME_OVERRIDES = {
     'open-jev-27b': 'Open-JEV 27B', 'bespoke-nimble-9b': 'Bespoke-Nimble 9B',
     'laya-multilingual': 'Laya Multilingual', 'agent-jev': 'Agent-JEV',
     'maxpressure': 'MaxPressure', 'decider-4b': 'Decider 4B',
+    'advanceddqn': 'AdvancedDQN', 'attendlight': 'AttendLight',
+    'citylight': 'CityLight', 'colight': 'CoLight', 'fixedtime': 'FixedTime',
+    'mplight': 'MPLight', 'presslight': 'PressLight', 'webster': 'Webster',
     'clef-27b': 'Clef 27B', 'clef-flash': 'Clef Flash',
     'pplx-decider-v1.2': 'PPLX Decider v1.2',
     'pplx-decider-flash-v1.2': 'PPLX Decider Flash v1.2',
@@ -151,11 +155,15 @@ def main() -> int:
     for entry in bench['aggregates']:
         groups.setdefault((entry['model'], entry['mode']), {})[entry['flow']] = entry['metrics']
 
-    # Column bounds over every published configuration.
+    # Column bounds over the decision-model configurations. Traditional
+    # baselines are scored against these bounds rather than setting them: they
+    # are a different class of method, and letting their numbers move the scale
+    # would silently change every published score.
     columns = {}
     for flow in flows:
         for metric in METRICS:
-            values = [g[flow][metric]['mean'] for g in groups.values() if flow in g]
+            values = [g[flow][metric]['mean'] for (model, mode), g in groups.items()
+                      if flow in g and mode != 'baseline']
             columns[(flow, metric)] = (min(values), max(values))
 
     # Serving telemetry grouped per configuration and per flow.
@@ -173,7 +181,7 @@ def main() -> int:
 
     configs = []
     for (model, mode), by_flow in groups.items():
-        if mode == 'maxpressure':
+        if mode in ('maxpressure', 'baseline'):
             continue
         if sorted(by_flow) != sorted(flows):
             raise SystemExit(f'{model} [{mode}] does not cover every flow')
@@ -255,6 +263,49 @@ def main() -> int:
         baseline = dict(id=model, name=published.get(model, 'MaxPressure'),
                         score=round(sum(scores) / len(scores), 2), cells=cells)
 
+    # Traditional baselines: scored on the same per-(flow, metric) columns as
+    # the decision models, but published as their own list so they appear
+    # alongside the index instead of competing for its rank.
+    baselines_runs = []
+    if BASELINES.is_file():
+        baselines_runs = json.loads(BASELINES.read_text(encoding='utf-8')).get('runs', [])
+    traditional = []
+    for (model, mode), by_flow in sorted(groups.items()):
+        if mode != 'baseline' or sorted(by_flow) != sorted(flows):
+            continue
+        cells, scores = {}, []
+        for flow in flows:
+            cells[flow] = {}
+            for metric in METRICS:
+                entry = by_flow[flow][metric]
+                score = cell_score(entry['mean'], *columns[(flow, metric)])
+                cells[flow][metric] = dict(raw=round(entry['mean'], 3),
+                                           sd=round(entry.get('sd') or 0.0, 3),
+                                           score=round(score, 2))
+                scores.append(score)
+        # Cost for a traditional controller is the wall clock it held the card
+        # for, times one GPU: it answers no requests, so there is no serving
+        # time to time. Per flow, the three seeds are reduced with a median,
+        # then averaged over the flows, matching the decision-model cost rule.
+        walls = [r.get('wall_s') for r in baselines_runs
+                 if r['model'] == model and r['flow'] in flows and r.get('wall_s') is not None]
+        by_flow = {flow: [r['wall_s'] for r in baselines_runs
+                          if r['model'] == model and r['flow'] == flow and r.get('wall_s') is not None]
+                   for flow in flows}
+        wall_by_flow = {flow: (round(statistics.median(values), 1) if values else None)
+                        for flow, values in by_flow.items()}
+        measured = [value for value in wall_by_flow.values() if value is not None]
+        traditional.append(dict(
+            id=model, name=NAME_OVERRIDES.get(model) or display_name(model, published),
+            mode='baseline', score=round(sum(scores) / len(scores), 2), cells=cells,
+            cost=dict(gpu_seconds=round(statistics.mean(measured), 1) if measured else None,
+                      wall_seconds=round(statistics.median(walls), 1) if walls else None,
+                      gpus=1, hosted=False, basis='wall clock x 1 GPU',
+                      by_flow=wall_by_flow)))
+    traditional.sort(key=lambda b: -b['score'])
+    for index, entry in enumerate(traditional, 1):
+        entry['rank'] = index
+
     payload = dict(
         schema_version=1,
         generated_at=datetime.now(timezone.utc).isoformat(),
@@ -283,6 +334,7 @@ def main() -> int:
         configs=configs,
         pareto=frontier,
         baseline=baseline,
+        traditional=traditional,
     )
 
     out = Path(args.out)

@@ -619,11 +619,13 @@
     <div class="ix-panel-head">
       <div>
         <div class="ix-panel-title">Composite score</div>
-        <div class="ix-panel-sub">Mean of the {cells} per-scene, per-metric scores ({scenes} flows × ATT / AWT / AQL). The dashed line is the rule-based baseline, scored on the same scale.</div>
+        <div class="ix-panel-sub">Mean of the {cells} per-scene, per-metric scores ({scenes} flows × ATT / AWT / AQL). The dashed line is the rule-based baseline, scored on the same scale. Traditional includes the RL and rule-based controllers run on the same protocol.</div>
       </div>
       <div class="ix-toggle" role="group" aria-label="Ranking mode" data-scope="bar">
+        <button type="button" data-mode="all" aria-pressed="false">All</button>
         <button type="button" data-mode="cojevlight" aria-pressed="true">CoJevLight</button>
         <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+        <button type="button" data-mode="baseline" aria-pressed="false">Traditional</button>
       </div>
     </div>
     <div class="ix-scroll"><div id="ix-bar"></div></div>
@@ -636,9 +638,10 @@
         <div class="ix-panel-sub">Up and to the left is better. The dashed step is the Pareto frontier: no configuration on this plane is both cheaper and higher scoring.</div>
       </div>
       <div class="ix-toggle" role="group" aria-label="Configurations shown" data-scope="scatter">
-        <button type="button" data-mode="both" aria-pressed="true">Both</button>
+        <button type="button" data-mode="all" aria-pressed="true">All</button>
         <button type="button" data-mode="cojevlight" aria-pressed="false">CoJevLight</button>
         <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+        <button type="button" data-mode="baseline" aria-pressed="false">Traditional</button>
       </div>
     </div>
     <div class="ix-scroll"><div id="ix-scatter"></div></div>
