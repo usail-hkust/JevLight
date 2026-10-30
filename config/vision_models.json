@@ -1,0 +1,20 @@
+{
+  "wemm-jev": {
+    "model_id": "Rover00/WeMM-JEV",
+    "revision": "a463f840c9259ff9139ab02181e01f20aca91b4b",
+    "min_free_gpu_gib": 70,
+    "max_body_mib": 32
+  },
+  "d3-turbo": {
+    "model_id": "vllm-sr/d3-turbo",
+    "revision": "a0f3e9e59ebd1202fe1d4de1c4c0f9a986758cbb",
+    "min_free_gpu_gib": 70,
+    "max_body_mib": 32
+  },
+  "amos-1-large": {
+    "model_id": "mukaddamzaid/amos-1-large",
+    "revision": "d67e051c763dc88a1e3662a5003c1e1ea5ffaa74",
+    "min_free_gpu_gib": 70,
+    "max_body_mib": 4
+  }
+}

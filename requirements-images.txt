@@ -2,3 +2,5 @@
 
 # Optional headless capture of the existing Three.js visualizer.
 playwright>=1.40,<2
+
+Pillow>=10,<13

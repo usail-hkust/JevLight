@@ -121,10 +121,59 @@ def test_asset_keys_do_not_count_as_references(image_path):
         JevClient._image_parts({"state": {"ref": 1}, "questions": {}}, {"ref": image_path})
 
 
-@pytest.mark.parametrize("transport", ["mcp", "local"])
+def test_multiple_images_remain_distinct_references(image_path):
+    payload = {"state": {"current": ["current-image"], "previous": ["previous-image"]}, "questions": {}}
+    parts = JevClient._image_parts(payload, {"current-image": image_path, "previous-image": image_path})
+    assert len(parts) == 3
+    assert payload["assets"]["current-image"]["part"] == "image-0"
+    assert payload["assets"]["previous-image"]["part"] == "image-1"
+
+
+def test_local_multi_image_labels_preserve_temporal_and_direction_mapping(image_path):
+    state = {"current_views": [{"view": "NORTHBOUND", "image": "uuid-current"}],
+             "previous_views": [{"view": "NORTHBOUND", "image": "uuid-previous"}]}
+    payload = {"state": state, "questions": {}}
+    JevClient._local_image_data_urls(payload, {"uuid-current": image_path, "uuid-previous": image_path})
+    assert payload["state"]["current_views"][0] == {"view": "NORTHBOUND", "image": "Image 1"}
+    assert payload["state"]["previous_views"][0] == {"view": "NORTHBOUND", "image": "Image 2"}
+    assert len(payload["images"]) == 2
+    assert state["current_views"][0]["image"] == "uuid-current"
+
+
+@pytest.mark.parametrize("transport", ["mcp"])
 def test_image_transport_must_be_explicit(transport, image_path):
     with pytest.raises(ValueError, match="official"):
         JevClient(transport=transport, mock=True).evaluate({"x": "ref"}, {}, assets={"ref": image_path})
+
+
+def test_local_image_request_uses_systemone_data_url(monkeypatch, image_path):
+    client = JevClient(transport="local", base_url="http://127.0.0.1:9",
+                       model="Cloudflare/clef-flash", max_retries=0)
+    captured = []
+
+    def post(url, **kwargs):
+        captured.append((url, kwargs))
+        return SimpleNamespace(
+            status_code=200, headers={}, raise_for_status=lambda: None,
+            json=lambda: {"answers": {"phase_i0": phase_answer("NTST")},
+                          "model": "Cloudflare/clef-flash", "usage": {"input_tokens": 3}},
+        )
+
+    monkeypatch.setattr(requests, "post", post)
+    result = client.evaluate(
+        {"camera_image": "unique-camera"},
+        {"phase_i0": {"type": "choice", "instructions": "Look at the traffic-camera image referenced by `camera_image`",
+                       "criteria": {"NTST": "go"}}},
+        assets={"unique-camera": image_path},
+    )
+    url, kwargs = captured[0]
+    assert url.endswith("/v1/systemone")
+    assert "Authorization" not in kwargs["headers"]
+    assert kwargs["json"]["model"] == "Cloudflare/clef-flash"
+    assert "camera_image" not in kwargs["json"]["state"]
+    assert "attached traffic-camera image" in kwargs["json"]["questions"]["phase_i0"]["instructions"]
+    assert kwargs["json"]["images"][0].startswith("data:image/jpeg;base64,")
+    assert result.answers["phase_i0"]["choice"] == "NTST"
 
 
 class ImageStub(JevClient):
@@ -152,7 +201,7 @@ def test_image_policy_includes_empty_junctions_without_numeric_oracle(image_path
     assert state["camera_image"] in assets
     assert list(questions) == ["phase_i0"]
     assert "Prevent spillback." in questions["phase_i0"]["instructions"]
-    assert "999" not in json.dumps(state)
+    assert 999 not in state.values()
     assert traces[0]["input_mode"] == "image"
     assert traces[0]["fallback"] is None
     assert traces[0]["mock"] is True

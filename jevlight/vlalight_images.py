@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import copy
 from pathlib import Path
 import sys
 
@@ -13,6 +14,51 @@ from jevlight.images import prune_frames
 
 SCENES = {("Jinan", "3_4"): "Jinan", ("Hangzhou", "4_4"): "Hangzhou",
           ("NewYork", "28_7"): "NewYork", ("NewYork", "16x3"): "NewYork16x3"}
+
+
+def isolate_jinan_movements(state, questions, assets, output_dir):
+    """Pixel-only masks calibrated on the pinned Jinan 384x720 camera views."""
+    sides = {'NORTHBOUND': 'S', 'SOUTHBOUND': 'N', 'EASTBOUND': 'W', 'WESTBOUND': 'E'}
+    state, questions = copy.deepcopy(state), copy.deepcopy(questions)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result_assets = {}
+    for group in ('current_views', 'previous_views'):
+        views = []
+        for item in state[group]:
+            source = Path(assets[item['image']])
+            image = Image.open(source).convert('RGB')
+            if image.size != (384, 720):
+                raise ValueError('Lane mask is calibrated only for 384x720 Jinan views')
+            if item['view'] not in sides:
+                raise ValueError('Unknown Jinan camera direction')
+            for suffix in ('T', 'L'):
+                lane = sides[item['view']] + suffix
+                def edge(y, fraction):
+                    left = 110 + (y - 28) * (35 - 110) / 617
+                    center = 149 + (y - 28) * (220 - 149) / 617
+                    return round(left + fraction * (center - left))
+                mask = Image.new('L', image.size, 0)
+                draw = ImageDraw.Draw(mask)
+                draw.rectangle((0, 0, 383, 27), fill=255)
+                # SUMO lane 2 is beside the centerline; curbside lane 0 turns right.
+                intervals = ((2/3, 1),) if suffix == 'L' else ((1/3, 2/3),)
+                for start, end in intervals:
+                    draw.polygon([(edge(28, start), 28), (edge(28, end), 28),
+                                  (edge(645, end), 645), (edge(645, start), 645)], fill=255)
+                isolated = Image.composite(image, Image.new('RGB', image.size, (32, 32, 32)), mask)
+                path = output_dir / f'{source.stem}_{lane}.png'
+                isolated.save(path)
+                reference = item['image'] + '_' + lane
+                views.append({'view': item['view'], 'movement': lane, 'image': reference})
+                result_assets[reference] = path
+        state[group] = views
+    for key, question in questions.items():
+        lane = key.split('_')[0]
+        question['instructions'] += (f' For {lane}, use ONLY images whose movement label is {lane}.'
+            ' Each image retains only its labeled movement lane; other lanes are masked out.'
+            ' Do not count vehicles from another movement image.')
+    return state, questions, result_assets
 
 
 def tls_camera_info(conn, tls_ids):
@@ -95,7 +141,7 @@ class VLALightRenderer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return self
 
-    def capture(self, conn, tls_ids, step):
+    def capture(self, conn, tls_ids, step, separate_views=False):
         tls_ids = list(tls_ids)
         if self.renderer is None:
             init, self.labels, self.centers = tls_camera_info(conn, tls_ids)
@@ -136,7 +182,17 @@ class VLALightRenderer:
                 image = compose_views(views, self.labels[tls])
                 path = self.output_dir / f"step_{step:06d}_{tls}.jpg"
                 image.save(path, quality=90)
-                paths[tls] = path
+                if separate_views:
+                    view_paths = []
+                    for index, label in enumerate(self.labels[tls]):
+                        view_path = self.output_dir / f"step_{step:06d}_{tls}_{label}.jpg"
+                        image.crop(((index % 2) * 384, (index // 2) * 720,
+                                    (index % 2 + 1) * 384, (index // 2 + 1) * 720)
+                                   ).save(view_path, quality=90)
+                        view_paths.append(view_path)
+                    paths[tls] = view_paths
+                else:
+                    paths[tls] = path
                 self._frames.setdefault(tls, []).append(path)
         if set(paths) != set(tls_ids):
             raise RuntimeError("Incomplete VLALight image batch")

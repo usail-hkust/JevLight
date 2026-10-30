@@ -1,5 +1,8 @@
 # JevLight
 
+Visual JevLight experiments (official API, WeMM-JEV, d3-turbo and Amos 1 Large):
+see the [Vision setup and experiment guide](docs/vision.md).
+
 Traffic signal control with **Jev**, the System One decision model — applied to SUMO simulation on top of the observation and control-flow conventions of **LLMLight / CoLLMLight**.
 
 Jev is not a chat model: one request sends a **state** plus a map of typed **questions**, and returns one typed answer per question, evaluated in parallel. JevLight maps signal control directly onto that interface: the model picks an action from the options you give it. The default path uses structured traffic observations; the optional experimental image path uses camera images and a prompt.

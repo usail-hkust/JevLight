@@ -177,14 +177,14 @@ class OutputLease:
         self._pid = None
 
     def __enter__(self):
-        import fcntl
+        from scripts.file_lock import lock_exclusive
 
         if self._stream is not None:
             raise RuntimeError("Output lease already acquired")
         self.directory.mkdir(parents=True, exist_ok=True)
         stream = (self.directory / ".simulation-output.lock").open("a+b")
         try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(stream, nonblocking=True)
         except BlockingIOError:
             stream.close()
             raise RuntimeError(f"Simulation output is already owned: {self.directory}") from None

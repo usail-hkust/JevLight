@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 import time
 import urllib.request
 
@@ -35,9 +34,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", type=Path, default=Path("logs/vlalight-source"))
     args = parser.parse_args()
-    tree = json.loads(subprocess.check_output([
-        "gh", "api", f"repos/{REPOSITORY}/git/trees/{REVISION}?recursive=1"
-    ]))
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{REPOSITORY}/git/trees/{REVISION}?recursive=1",
+        headers={"User-Agent": "JevLight-renderer-fetch"},
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        tree = json.load(response)
     if tree.get("truncated"):
         raise RuntimeError("GitHub returned an incomplete tree")
     entries = [e for e in tree["tree"] if e["type"] == "blob" and selected(e["path"])]
