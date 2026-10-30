@@ -108,6 +108,18 @@ def test_hosted_models_are_ranked_but_not_priced(composite):
         assert config['id'] not in composite['pareto']
 
 
+def test_traditional_reference_matches_the_baseline_line(composite):
+    # The Traditional row with the reference line's id is the same controller,
+    # so it must land on the line; distinct controllers need distinct names.
+    traditional = composite.get('traditional') or []
+    names = [entry['name'] for entry in traditional]
+    assert len(set(names)) == len(names)
+    baseline = composite['baseline']
+    for entry in traditional:
+        if entry['id'] == baseline['id']:
+            assert entry['score'] == pytest.approx(baseline['score'], abs=0.5)
+
+
 def test_published_file_matches_the_generator(composite):
     if not COMPOSITE.is_file():
         pytest.skip('assets/composite.json has not been generated in this checkout')

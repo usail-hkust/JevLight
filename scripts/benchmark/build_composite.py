@@ -47,7 +47,8 @@ NAME_OVERRIDES = {
     'open-jev-2b': 'Open-JEV 2B', 'open-jev-9b': 'Open-JEV 9B',
     'open-jev-27b': 'Open-JEV 27B', 'bespoke-nimble-9b': 'Bespoke-Nimble 9B',
     'laya-multilingual': 'Laya Multilingual', 'agent-jev': 'Agent-JEV',
-    'maxpressure': 'MaxPressure', 'decider-4b': 'Decider 4B',
+    'maxpressure': 'MaxPressure', 'maxpressure-strict': 'MaxPressure (strict)',
+    'decider-4b': 'Decider 4B',
     'advanceddqn': 'AdvancedDQN', 'attendlight': 'AttendLight',
     'citylight': 'CityLight', 'colight': 'CoLight', 'fixedtime': 'FixedTime',
     'mplight': 'MPLight', 'presslight': 'PressLight', 'webster': 'Webster',
@@ -305,6 +306,18 @@ def main() -> int:
     traditional.sort(key=lambda b: -b['score'])
     for index, entry in enumerate(traditional, 1):
         entry['rank'] = index
+    # The reference line and a Traditional row with its id are one controller;
+    # a different controller under that id would put two MaxPressures on the
+    # page that disagree.
+    names = [entry['name'] for entry in traditional]
+    if len(set(names)) != len(names):
+        raise SystemExit(f'traditional controllers share a display name: {names}')
+    for entry in traditional:
+        if baseline and entry['id'] == baseline['id'] \
+                and abs(entry['score'] - baseline['score']) > 0.5:
+            raise SystemExit(
+                f"traditional {entry['id']} scores {entry['score']} but the reference "
+                f"line with that id scores {baseline['score']}: different controllers?")
 
     payload = dict(
         schema_version=1,

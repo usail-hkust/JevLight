@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated_at": "2026-10-29T17:59:11.049317+00:00",
+ "updated_at": "2026-10-30T04:18:46.800599+00:00",
  "source": {
   "campaign": "baseline-a40",
   "flows": 7,
@@ -41,6 +41,11 @@
   {
    "id": "maxpressure",
    "name": "MaxPressure",
+   "kind": "baseline"
+  },
+  {
+   "id": "maxpressure-strict",
+   "name": "MaxPressure (strict)",
    "kind": "baseline"
   },
   {
@@ -947,6 +952,181 @@
    "n": 3,
    "metrics": {
     "att": {
+     "mean": 383.54665325734715,
+     "sd": 2.9516973682936385
+    },
+    "awt": {
+     "mean": 69.94826237568444,
+     "sd": 2.309087206843488
+    },
+    "aql": {
+     "mean": 57.90675925925925,
+     "sd": 1.9169980054451445
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-2",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 435.65713759844084,
+     "sd": 4.116366199021616
+    },
+    "awt": {
+     "mean": 140.69714913565736,
+     "sd": 4.35980693257107
+    },
+    "aql": {
+     "mean": 244.88000000000002,
+     "sd": 4.331683206116094
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-1",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 345.20794281175534,
+     "sd": 0.6403605968577696
+    },
+    "awt": {
+     "mean": 88.2298120201218,
+     "sd": 0.6107963847705058
+    },
+    "aql": {
+     "mean": 154.03333333333333,
+     "sd": 1.0728190984043955
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-2",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 329.33379152348226,
+     "sd": 1.1916269911936734
+    },
+    "awt": {
+     "mean": 67.031996945399,
+     "sd": 0.6597817364513313
+    },
+    "aql": {
+     "mean": 81.14083333333333,
+     "sd": 0.7970368057706503
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-3",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 323.6722485135299,
+     "sd": 0.9540125578411672
+    },
+    "awt": {
+     "mean": 71.8327872830967,
+     "sd": 0.7508374606596905
+    },
+    "aql": {
+     "mean": 109.43564814814816,
+     "sd": 1.1395841486669638
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-1",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 1188.4165583561992,
+     "sd": 10.02541624240292
+    },
+    "awt": {
+     "mean": 806.2327903265799,
+     "sd": 11.012091767959468
+    },
+    "aql": {
+     "mean": 2058.5275925925926,
+     "sd": 18.781581888531154
+    }
+   }
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-2",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
+     "mean": 1506.698936843745,
+     "sd": 4.145999019562883
+    },
+    "awt": {
+     "mean": 1149.1944254353457,
+     "sd": 3.9210582050707843
+    },
+    "aql": {
+     "mean": 3596.2112037037036,
+     "sd": 6.996038199487119
+    }
+   }
+  },
+  {
+   "model": "maxpressure-strict",
+   "flow": "hangzhou-1",
+   "mode": "baseline",
+   "seeds": [
+    1,
+    2,
+    3
+   ],
+   "n": 3,
+   "metrics": {
+    "att": {
      "mean": 448.7129288188624,
      "sd": 38.87471719207198
     },
@@ -961,7 +1141,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-2",
    "mode": "baseline",
    "seeds": [
@@ -986,7 +1166,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-1",
    "mode": "baseline",
    "seeds": [
@@ -1011,7 +1191,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-2",
    "mode": "baseline",
    "seeds": [
@@ -1036,7 +1216,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-3",
    "mode": "baseline",
    "seeds": [
@@ -1061,7 +1241,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-1",
    "mode": "baseline",
    "seeds": [
@@ -1086,7 +1266,7 @@
    }
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-2",
    "mode": "baseline",
    "seeds": [
@@ -2691,6 +2871,216 @@
    "model": "maxpressure",
    "flow": "hangzhou-1",
    "seed": 1,
+   "att": 383.7381830372109,
+   "awt": 70.17298022125377,
+   "aql": 58.091944444444444,
+   "fallback_rate": 0.0,
+   "wall_s": 47.2
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-1",
+   "seed": 2,
+   "att": 386.39792155548105,
+   "awt": 72.13677505866578,
+   "aql": 59.724444444444444,
+   "fallback_rate": 0.0,
+   "wall_s": 46.5
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-1",
+   "seed": 3,
+   "att": 380.50385517934967,
+   "awt": 67.53503184713375,
+   "aql": 55.903888888888886,
+   "fallback_rate": 0.0,
+   "wall_s": 45.8
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-2",
+   "seed": 1,
+   "att": 440.1672067401167,
+   "awt": 145.61373946856773,
+   "aql": 249.37472222222223,
+   "fallback_rate": 0.0,
+   "wall_s": 79.3
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-2",
+   "seed": 2,
+   "att": 434.70169063043136,
+   "awt": 139.17601516827304,
+   "aql": 244.53305555555556,
+   "fallback_rate": 0.0,
+   "wall_s": 83.0
+  },
+  {
+   "model": "maxpressure",
+   "flow": "hangzhou-2",
+   "seed": 3,
+   "att": 432.10251542477454,
+   "awt": 137.3016927701313,
+   "aql": 240.73222222222222,
+   "fallback_rate": 0.0,
+   "wall_s": 79.7
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-1",
+   "seed": 1,
+   "att": 344.50818109610805,
+   "awt": 87.90150913423352,
+   "aql": 153.45111111111112,
+   "fallback_rate": 0.0,
+   "wall_s": 61.4
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-1",
+   "seed": 2,
+   "att": 345.35091342335187,
+   "awt": 87.85337569499603,
+   "aql": 153.3775,
+   "fallback_rate": 0.0,
+   "wall_s": 61.3
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-1",
+   "seed": 3,
+   "att": 345.7647339158062,
+   "awt": 88.93455123113583,
+   "aql": 155.27138888888888,
+   "fallback_rate": 0.0,
+   "wall_s": 63.0
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-2",
+   "seed": 1,
+   "att": 328.39450171821306,
+   "awt": 66.27285223367697,
+   "aql": 80.22555555555556,
+   "fallback_rate": 0.0,
+   "wall_s": 48.3
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-2",
+   "seed": 2,
+   "att": 330.6742268041237,
+   "awt": 67.46712485681557,
+   "aql": 81.68194444444444,
+   "fallback_rate": 0.0,
+   "wall_s": 47.4
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-2",
+   "seed": 3,
+   "att": 328.93264604811,
+   "awt": 67.35601374570447,
+   "aql": 81.515,
+   "fallback_rate": 0.0,
+   "wall_s": 47.9
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-3",
+   "seed": 1,
+   "att": 323.55005460502366,
+   "awt": 71.94958136148526,
+   "aql": 109.60222222222222,
+   "fallback_rate": 0.0,
+   "wall_s": 52.7
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-3",
+   "seed": 2,
+   "att": 324.681470695304,
+   "awt": 72.5183836912996,
+   "aql": 110.48277777777778,
+   "fallback_rate": 0.0,
+   "wall_s": 52.1
+  },
+  {
+   "model": "maxpressure",
+   "flow": "jinan-3",
+   "seed": 3,
+   "att": 322.7852202402621,
+   "awt": 71.03039679650527,
+   "aql": 108.22194444444445,
+   "fallback_rate": 0.0,
+   "wall_s": 52.9
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-1",
+   "seed": 1,
+   "att": 1177.7643291706693,
+   "awt": 796.9337175792507,
+   "aql": 2049.6280555555554,
+   "fallback_rate": 0.0,
+   "wall_s": 531.2
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-1",
+   "seed": 2,
+   "att": 1189.8175639227532,
+   "awt": 803.3715611177042,
+   "aql": 2045.85,
+   "fallback_rate": 0.0,
+   "wall_s": 528.0
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-1",
+   "seed": 3,
+   "att": 1197.6677819751753,
+   "awt": 818.3930922827847,
+   "aql": 2080.1047222222223,
+   "fallback_rate": 0.0,
+   "wall_s": 528.4
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-2",
+   "seed": 1,
+   "att": 1503.939478503532,
+   "awt": 1147.3875468736373,
+   "aql": 3602.118611111111,
+   "fallback_rate": 0.0,
+   "wall_s": 670.8
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-2",
+   "seed": 2,
+   "att": 1511.466637401229,
+   "awt": 1153.6931518876206,
+   "aql": 3598.0294444444444,
+   "fallback_rate": 0.0,
+   "wall_s": 660.9
+  },
+  {
+   "model": "maxpressure",
+   "flow": "newyork-2",
+   "seed": 3,
+   "att": 1504.6906946264744,
+   "awt": 1146.5025775447793,
+   "aql": 3588.4855555555555,
+   "fallback_rate": 0.0,
+   "wall_s": 671.7
+  },
+  {
+   "model": "maxpressure-strict",
+   "flow": "hangzhou-1",
+   "seed": 1,
    "att": 412.41032517599734,
    "awt": 99.93697619845793,
    "aql": 82.73257428492086,
@@ -2698,7 +3088,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-1",
    "seed": 2,
    "att": 443.9986590680523,
@@ -2708,7 +3098,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-1",
    "seed": 3,
    "att": 489.7298022125377,
@@ -2718,7 +3108,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-2",
    "seed": 1,
    "att": 426.85522745411015,
@@ -2728,7 +3118,7 @@
    "wall_s": 90.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-2",
    "seed": 2,
    "att": 448.0882681564246,
@@ -2738,7 +3128,7 @@
    "wall_s": 100.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "hangzhou-2",
    "seed": 3,
    "att": 438.21603065623503,
@@ -2748,7 +3138,7 @@
    "wall_s": 90.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-1",
    "seed": 1,
    "att": 360.82462271644164,
@@ -2758,7 +3148,7 @@
    "wall_s": 80.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-1",
    "seed": 2,
    "att": 349.946624305004,
@@ -2768,7 +3158,7 @@
    "wall_s": 70.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-1",
    "seed": 3,
    "att": 362.5234312946783,
@@ -2778,7 +3168,7 @@
    "wall_s": 70.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-2",
    "seed": 1,
    "att": 332.61397479954184,
@@ -2788,7 +3178,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-2",
    "seed": 2,
    "att": 333.3418098510882,
@@ -2798,7 +3188,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-2",
    "seed": 3,
    "att": 333.0552119129439,
@@ -2808,7 +3198,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-3",
    "seed": 1,
    "att": 317.86967601019296,
@@ -2818,7 +3208,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-3",
    "seed": 2,
    "att": 327.8452857662905,
@@ -2828,7 +3218,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "jinan-3",
    "seed": 3,
    "att": 325.9346559883509,
@@ -2838,7 +3228,7 @@
    "wall_s": 60.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-1",
    "seed": 1,
    "att": 1581.3419339841935,
@@ -2848,7 +3238,7 @@
    "wall_s": 600.9
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-1",
    "seed": 2,
    "att": 1578.0600978336827,
@@ -2858,7 +3248,7 @@
    "wall_s": 590.9
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-1",
    "seed": 3,
    "att": 1577.508881922675,
@@ -2868,7 +3258,7 @@
    "wall_s": 631.0
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-2",
    "seed": 1,
    "att": 1788.9494110832206,
@@ -2878,7 +3268,7 @@
    "wall_s": 741.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-2",
    "seed": 2,
    "att": 1796.553519768563,
@@ -2888,7 +3278,7 @@
    "wall_s": 741.1
   },
   {
-   "model": "maxpressure",
+   "model": "maxpressure-strict",
    "flow": "newyork-2",
    "seed": 3,
    "att": 1789.211725132148,

@@ -164,18 +164,21 @@ def main():
     baselined = {m['id'] for m in baseline_models}
 
     # Keep published models that this checkout has no results for: their numbers
-    # came from elsewhere and must not silently disappear from the page.
+    # came from elsewhere and must not silently disappear from the page. The
+    # baseline mode is the exception: baselines.json is its only source, so a
+    # baseline it no longer lists (e.g. a renamed id) is dropped, not kept.
     new_keys = {(a['model'], a['flow'], a['mode']) for a in newest}
-    new_keys |= {(a['model'], a['flow'], a['mode']) for a in baseline_aggregates}
     kept = [a for a in existing.get('aggregates', [])
-            if (a['model'], a['flow'], a['mode']) not in new_keys]
+            if (a['model'], a['flow'], a['mode']) not in new_keys and a['mode'] != 'baseline']
 
     names = display_names()
+    baseline_names = {m['id']: m['name'] for m in baseline_models}
     models = []
     for model in sorted(new_models | {a['model'] for a in kept} | baselined):
         previous = next((m for m in existing.get('models', []) if m['id'] == model), None)
         models.append(dict(id=model,
-                           name=(previous or {}).get('name') or names.get(model)
+                           name=baseline_names.get(model) or (previous or {}).get('name')
+                                or names.get(model)
                                 or NAME_OVERRIDES.get(model) or default_name(model),
                            kind='baseline' if model in baselined
                                 else (previous or {}).get('kind', 'native')))
