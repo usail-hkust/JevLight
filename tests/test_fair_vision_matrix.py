@@ -58,6 +58,12 @@ def test_smoke_is_separate_and_never_claims_to_be_a_formal_result():
     assert {j["effective_config"]["count"] for j in plan["jobs"]} == {30}
 
 
+def test_resume_identity_includes_simulation_environment_and_model_adapter(plan):
+    assert {"uv.lock", "pyproject.toml", "scripts/setup_vision_runner.sh",
+            "scripts/vision_runner_requirements.txt", "scripts/run_vision_server.sh",
+            "scripts/serve_vision_model.py"} <= plan["source_hashes"].keys()
+
+
 def test_configuration_drift_is_rejected_before_any_run(monkeypatch):
     original = Path.read_text
 

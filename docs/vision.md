@@ -42,6 +42,10 @@ Local image references become ordered `Image 1`, `Image 2`, etc., preserving
 direction and time associations. Author runtimes use their native decision heads
 and BF16 weights, without quantization or CPU offload.
 
+The upstream text Jev configurations remain unchanged at `jev-1.13.0`; the
+visual matrix explicitly selects `jev-1.14.0` for image inference. Comparing
+these two methods therefore also includes a model-version difference.
+
 ## Environment
 
 The automated setup targets Ubuntu 24.04 / Linux x86_64. It needs Python 3, Git,
@@ -55,7 +59,11 @@ sudo apt-get install -y python3-venv xvfb xauth libgl1 libegl1 libopengl0 libgli
 ```
 
 Scripts create isolated Python 3.12 environments using uv under `.local/`.
-The simulation environment uses SUMO 1.24.0, traci/sumolib 1.27.0, and fetches
+The simulation environment uses the repository's `uv.lock` via
+`uv sync --locked --extra sumo`, matching the baseline (currently SUMO and
+traci/sumolib 1.28.0). Renderer dependencies are installed with constraints
+exported from that lockfile, so they cannot replace its pinned core packages.
+Setup fetches
 the VLALight renderer and scene assets at revision
 `9844f1b6bbd6b4fe80b481d3dd16fadce13c3b5d`, checking Git blob hashes.
 GitHub CLI and old upload archives are not required.

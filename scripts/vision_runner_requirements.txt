@@ -1,11 +1,4 @@
-numpy==2.4.4
-pandas==3.0.2
-requests==2.33.1
-tqdm
-typesafe-sdk
-traci==1.27.0
-sumolib==1.27.0
-eclipse-sumo==1.24.0
+# Core simulation/API dependencies come from the repository's uv.lock.
 pillow==12.2.0
 panda3d==1.10.16
 panda3d-simplepbr==0.13.1

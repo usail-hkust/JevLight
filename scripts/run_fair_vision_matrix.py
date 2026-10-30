@@ -44,7 +44,10 @@ def digest(path):
 def source_hashes():
     files = [ROOT / "run_jevlight.py", Path(__file__),
              ROOT / "scripts/benchmark_vlalight_jev.py", ROOT / "scripts/file_lock.py",
-             ROOT / "config/vision_models.json"]
+             ROOT / "config/vision_models.json", ROOT / "pyproject.toml", ROOT / "uv.lock",
+             ROOT / "scripts/vision_runner_requirements.txt",
+             ROOT / "scripts/setup_vision_runner.sh", ROOT / "scripts/run_vision_server.sh",
+             ROOT / "scripts/serve_vision_model.py"]
     for directory in ("jevlight", "utils"):
         files.extend((ROOT / directory).rglob("*.py"))
     return {p.relative_to(ROOT).as_posix(): digest(p) for p in sorted(set(files))}

@@ -66,7 +66,8 @@ def test_clean_setup_installs_runner_and_fetches_assets_without_models(tmp_path)
     commands = {
         binaries / "python3": '#!/usr/bin/env bash\nexit 0\n',
         binaries / "xvfb-run": '#!/usr/bin/env bash\nexit 0\n',
-        binaries / "uv": '#!/usr/bin/env bash\nprintf "uv %s\\n" "$*" >> "$SETUP_CALLS"\n',
+        binaries / "uv": '#!/usr/bin/env bash\nprintf "uv %s\\n" "$*" >> "$SETUP_CALLS"\n'
+                         'if [[ "$1" == sync ]]; then printf "env %s\\n" "$UV_PROJECT_ENVIRONMENT" >> "$SETUP_CALLS"; fi\n',
         runner_bin / "sumo": '#!/usr/bin/env bash\nprintf "sumo %s\\n" "$*" >> "$SETUP_CALLS"\n',
         runner_bin / "python": '#!/usr/bin/env bash\nprintf "runner %s\\n" "$*" >> "$SETUP_CALLS"\n',
     }
@@ -77,6 +78,24 @@ def test_clean_setup_installs_runner_and_fetches_assets_without_models(tmp_path)
         env={**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
              "SETUP_CALLS": str(calls)}, text=True, capture_output=True)
     lines = calls.read_text().splitlines()
-    assert len(lines) == 3
-    assert "-r scripts/vision_runner_requirements.txt" in lines[0]
-    assert lines[1:] == ["sumo --version", "runner scripts/fetch_vlalight_renderer.py"]
+    assert len(lines) == 7
+    assert lines[0] == "uv sync --locked --no-dev --extra sumo --python 3.12"
+    assert lines[1].replace("\\", "/").endswith("/.local/vision-runner")
+    assert lines[2].startswith("uv export --locked --no-dev --extra sumo --no-emit-project --no-hashes --output-file ")
+    assert " -c " in lines[3] and "vision-core-constraints.txt" in lines[3]
+    assert lines[3].endswith("-r scripts/vision_runner_requirements.txt")
+    assert lines[4].startswith("uv pip check --python ")
+    assert lines[5:] == ["sumo --version", "runner scripts/fetch_vlalight_renderer.py"]
+
+
+def test_renderer_requirements_do_not_override_the_core_project_dependencies():
+    import tomllib
+    import re
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    core = {re.split(r"[<>=!~;\[]", value)[0].strip() for value in
+            project["dependencies"] + project["optional-dependencies"]["sumo"]}
+    renderer = {re.split(r"[<>=!~;\[]", line)[0].strip() for line in
+                (ROOT / "scripts/vision_runner_requirements.txt").read_text().splitlines()
+                if line.strip() and not line.startswith("#")}
+    assert not core & renderer
