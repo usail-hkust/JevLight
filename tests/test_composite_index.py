@@ -121,8 +121,10 @@ def test_telemetry_is_deduplicated_and_covers_every_group():
     keys = [(r['model'], r['mode'], r['flow'], r['seed']) for r in telemetry['runs']]
     assert len(keys) == len(set(keys))
     benchmark = json.loads(BENCHMARK.read_text(encoding='utf-8'))
+    # Traditional baselines have no serving telemetry: they are local
+    # controllers, not models answering requests, so there is nothing to price.
     published = {(a['model'], a['mode'], a['flow']) for a in benchmark['aggregates']
-                 if a['mode'] != 'maxpressure'}
+                 if a['mode'] not in ('maxpressure', 'baseline')}
     covered = {(r['model'], r['mode'], r['flow']) for r in telemetry['runs']}
     assert published == covered
     for run in telemetry['runs']:
