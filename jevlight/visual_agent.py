@@ -6,11 +6,11 @@ import math
 from pathlib import Path
 import uuid
 
-from .controller import phase_criteria
+from .controller import PHASE_QUESTION_PREFIX, phase_criteria
 from .jev_client import JevResult
-from .observation import CONTROLLED_LANES
+from .observation import CONTROLLED_LANES, canonical_phase_name
 
-VISUAL_PROMPT_VERSION = "vlalight-two-stage-v1"
+VISUAL_PROMPT_VERSION = "vlalight-two-stage-v2"
 COUNT_CRITERIA = {
     "none": "No visible vehicles for this movement.",
     "few": "One to three visible vehicles for this movement.",
@@ -38,7 +38,7 @@ class VisualAgent:
         self.controller = controller
         self.cooperation = cooperation
         if cooperation:
-            self.prompt_version += '-co-visual-v1'
+            self.prompt_version += '-co'
         self.previous_views = {}
         self.unserved = {}
         self.last_step = None
@@ -56,8 +56,10 @@ class VisualAgent:
 
         previous = self.previous_views.get(observation.intersection_id)
         state = {
+            "intersection_id": observation.intersection_id,
             "current_views": references(paths),
             "previous_views": references(previous[1]) if previous else [],
+            "elapsed_s": (step - previous[0]) * self.controller.phase_duration if previous else None,
         }
         mapping = (
             "Movement codes name the incoming side. EASTBOUND arrives from west (WT/WL); "
@@ -111,55 +113,72 @@ class VisualAgent:
         return lanes
 
     @staticmethod
-    def _cooperative_view(observation, perceptions):
-        """Route this step's image estimates using static lane connections only."""
-        identities = sorted({
-            ref['intersection_id']
-            for lane in CONTROLLED_LANES
-            for side in ('upstream', 'downstream')
-            for ref in observation.lane_relations.get(lane, {}).get(side, [])
-        })
-        aliases = {identity: f'neighbour_{i + 1}' for i, identity in enumerate(identities)}
-        links = {}
+    def _cooperative_view(observation, perceptions, current_phases):
+        """Route current visual estimates with static connections and known signals."""
+        view = {}
         for lane in CONTROLLED_LANES:
-            links[lane] = {}
+            view[lane] = {}
             for side in ('upstream', 'downstream'):
-                links[lane][side] = []
+                entries = []
                 for ref in observation.lane_relations.get(lane, {}).get(side, []):
-                    link = {'neighbour': aliases[ref['intersection_id']], 'movement': ref['lane']}
-                    if link not in links[lane][side]:
-                        links[lane][side].append(link)
-        return {
-            'neighbours': {aliases[identity]: {'visual_perception': perceptions.get(identity)}
-                           for identity in identities},
-            'possible_connections': links,
-        }
+                    identity, movement = ref['intersection_id'], ref['lane']
+                    neighbour = perceptions.get(identity, {})
+                    if movement not in neighbour:
+                        continue
+                    entry = {'intersection_id': identity, 'lane': movement,
+                             'current_phase': current_phases[identity],
+                             'visual_estimate': neighbour[movement]}
+                    if entry not in entries:
+                        entries.append(entry)
+                view[lane][side] = entries
+        return view
 
-    def _decision_request(self, observation, perceptions, prompt=None):
-        state = {'visual_perception': perceptions[observation.intersection_id]}
+    def _decision_request(self, observation, perceptions, current_phases, prompt=None):
+        identity = observation.intersection_id
+        age = self.unserved.setdefault(identity, {p: 0 for p in phase_criteria(observation)})
+        state = {
+            'prompt_version': self.prompt_version,
+            'intersection_id': identity,
+            'current_phase': current_phases[identity],
+            'control_interval_s': self.controller.phase_duration,
+            'yellow_time_s': observation.yellow_time,
+            'green_time_if_switch_s': max(0, self.controller.phase_duration - observation.yellow_time),
+            'visual_perception': perceptions[identity],
+            'count_buckets': COUNT_CRITERIA,
+            'unserved_nonempty_observation_steps': dict(age),
+        }
         instructions = (
-            "Choose a traffic signal using only visual_perception, which was estimated "
-            "from the supplied camera images. Counts are visual ranges, not exact "
-            "measurements. Queue is a subset of demand; do not add it twice. Unknown "
-            "means unavailable visual evidence, never zero. Prefer phases serving "
-            "larger visible demand and queues that are growing. Choose only from the "
-            "provided phase criteria."
+            "Choose the next traffic signal using visual_perception, recent demand trends "
+            "and persistent unserved demand. Counts are visual ranges, not exact simulator "
+            "measurements. Queue is a subset of demand: do not add it to demand again. "
+            "Unknown means unavailable evidence, never zero. Prefer phases releasing "
+            "larger visible demand and sustained or growing queues. Use persistent "
+            "unserved demand to avoid starvation. Account for yellow-time loss when "
+            "switching; keep the current phase when evidence is similar or all movements "
+            "are empty. Choose only from the provided phase criteria."
         )
         if self.cooperation:
-            state['cooperative_view'] = self._cooperative_view(observation, perceptions)
-            instructions += (
-                " If cooperative_view is supplied, it contains only neighbouring camera "
-                "estimates and static possible lane connections. Prioritize the local "
-                "visible demand. Upstream demand is a possible future arrival, not a "
-                "guaranteed arrival or a known turning route. Downstream queues can "
-                "warn of spillback, but do not measure free storage. Never sum the same "
-                "neighbour movement repeatedly across possible connections. Missing "
-                "neighbours or movements are unknown, not zero. Do not infer their "
-                "signal phases, exact counts, travel times or receiving capacity."
+            state['cooperative_view'] = self._cooperative_view(observation, perceptions, current_phases)
+            instructions = (
+                "Choose the next traffic signal using visual_perception, recent demand trends, "
+                "persistent unserved demand, and cooperative_view. Counts are visual ranges, "
+                "not exact simulator measurements. Queue is a subset of demand: do not add "
+                "it to demand again. Unknown means unavailable evidence, never zero. "
+                "cooperative_view lists possible upstream/downstream lane connections from "
+                "the road network, not known destinations or routing proportions. Upstream "
+                "demand is potential future demand, not a guaranteed arrival in this interval. "
+                "Do not double-count one neighbour listed under multiple movements. "
+                "Downstream queued demand can indicate spillback risk but does not establish "
+                "free storage or an exact receiving capacity. Missing neighbours are unknown. "
+                "Prefer phases releasing larger visible demand and sustained or growing queues. "
+                "Use persistent unserved demand to avoid starvation. Account for yellow-time "
+                "loss when switching; keep the current phase when evidence is similar or all "
+                "movements are empty. Choose only from the provided phase criteria."
             )
+        state['topology_available'] = observation.topology_available
         if prompt:
             instructions += "\nAdditional control instructions: " + prompt
-        return state, {'phase_decision': {
+        return state, {f'{PHASE_QUESTION_PREFIX}{identity}': {
             'type': 'choice', 'instructions': instructions, 'criteria': phase_criteria(observation)}}
 
     def decide(self, observations, images, step, prompt=None):
@@ -209,12 +228,14 @@ class VisualAgent:
                 if not result.error:
                     controller.total_failures += 1
 
+        current_phases = {o.intersection_id: canonical_phase_name(o.current_phase or o.phases[0])
+                          for o in observations}
         decisions = []
         for observation in observations:
             identity = observation.intersection_id
             if identity not in perceptions:
                 continue
-            state, questions = self._decision_request(observation, perceptions, prompt)
+            state, questions = self._decision_request(observation, perceptions, current_phases, prompt)
             decisions.append((observation, state, questions))
         # Every current perception is complete before any routed decision is sent.
         with ThreadPoolExecutor(max_workers=controller.max_workers) as executor:
@@ -224,7 +245,7 @@ class VisualAgent:
         for observation, request, perception_result, group, responses in zip(
                 observations, requests, results, groups, response_groups):
             identity = observation.intersection_id
-            phase_id = "phase_decision"
+            phase_id = f"{PHASE_QUESTION_PREFIX}{identity}"
             if identity in routed:
                 (_, state, questions), result = routed[identity]
                 controller._record_result(result)
@@ -251,6 +272,13 @@ class VisualAgent:
                      **asdict(response)} for item, response in zip(group, responses)]
             actions[identity] = controller._phase_to_action(observation, signal)
             controller.previous_signals[identity] = signal
+            if identity in perceptions:
+                for phase in self.unserved[identity]:
+                    if phase == signal:
+                        self.unserved[identity][phase] = 0
+                    elif any(perceptions[identity][phase[i:i+2]]['demand']['estimate']
+                             not in ('none', 'unknown') for i in (0, 2)):
+                        self.unserved[identity][phase] += 1
             traces.append(trace)
         self.previous_views = {identity: (step, paths) for identity, paths in normalized.items()}
         self.last_step = step
@@ -261,7 +289,7 @@ class JinanGroupedVisualAgent(VisualAgent):
     """Experimental Jinan-only lane masks and two opposite-approach requests."""
 
     image_agent = 'vlalight-grouped'
-    prompt_version = 'vlalight-jinan-opposite-v2'
+    prompt_version = 'vlalight-jinan-opposite-v3'
 
     def _perception_request(self, observation, paths, step):
         from .vlalight_images import isolate_jinan_movements

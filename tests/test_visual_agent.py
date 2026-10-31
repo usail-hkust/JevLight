@@ -52,16 +52,21 @@ def test_visual_barrier_routes_only_current_visual_estimates_and_tracks_history(
     state = client.calls[2][0]
     assert "visual_perception" in state
     assert "cooperative_view" not in state
-    assert "current_phase" not in state
-    assert "intersection_id" not in state
+    assert state["current_phase"] == "ETWT"
+    assert state["intersection_id"] == "a"
+    assert state["control_interval_s"] == 15
+    assert state["yellow_time_s"] == 5
+    assert state["green_time_if_switch_s"] == 10
+    assert state["unserved_nonempty_observation_steps"] == dict.fromkeys(("ETWT", "NTST", "ELWL", "NLSL"), 0)
     assert traces[0]["image_agent"] == "vlalight"
     assert traces[0]["fallback"] is None
     agent.decide([a, b], {"a": views(), "b": views()}, 1)
     second = client.calls[4]
     assert len(second[2]) == 8
-    assert "elapsed_s" not in second[0]
+    assert second[0]["elapsed_s"] == 15
     assert len(second[0]["previous_views"]) == 4
-    assert client.calls[6][0].keys() == {"visual_perception"}
+    assert client.calls[6][0]["unserved_nonempty_observation_steps"]["ETWT"] == 1
+    assert state["unserved_nonempty_observation_steps"]["ETWT"] == 0
     assert controller.usage_summary()["requests"] == 8
     with pytest.raises(ValueError, match="increase"):
         agent.decide([a], {"a": views()}, 1)
@@ -77,29 +82,32 @@ def test_failed_perception_holds_signal_and_is_not_routed_as_empty():
     assert actions == {"a": 1, "b": 0}
     assert traces[1]["fallback"] == "visual_perception_failed"
     assert traces[1]["error"] == "camera unavailable"
-    assert "current_phase" not in client.calls[2][0]
+    assert client.calls[2][0]["current_phase"] == "ETWT"
     assert "cooperative_view" not in client.calls[2][0]
     assert len(client.calls) == 3
     assert controller.usage_summary()['failures'] == 1
 
 
-def test_visual_requests_do_not_depend_on_simulator_traffic_state(monkeypatch):
+@pytest.mark.parametrize('cooperation', [False, True])
+def test_visual_requests_do_not_depend_on_simulator_traffic_state(monkeypatch, cooperation):
     monkeypatch.setattr("jevlight.visual_agent.uuid.uuid4", lambda: "fixed-camera-reference")
     clients = [VisualStub(), VisualStub()]
     for index, client in enumerate(clients):
-        observation = make_observation()
-        observation.empty = bool(index)
-        for lane in observation.lanes.values():
-            lane.queue = index * 987
-            lane.approaching = index * 654
-            lane.avg_wait = index * 321
-            lane.occupancy = index * .9
-            lane.cells = [index * 123] * len(lane.cells)
-            lane.llmlight_cells = [index * 456] * len(lane.llmlight_cells)
-            lane.vehicles = {"hidden-simulator-vehicle": index}
-        agent = VisualAgent(JevLightController(client, 15))
+        observations = [make_observation('a'), make_observation('b')]
+        observations[0].lane_relations = {'WT': {'upstream': [{'intersection_id': 'b', 'lane': 'ET'}]}}
+        for observation in observations:
+            observation.empty = bool(index)
+            for lane in observation.lanes.values():
+                lane.queue = index * 987
+                lane.approaching = index * 654
+                lane.avg_wait = index * 321
+                lane.occupancy = index * .9
+                lane.cells = [index * 123] * len(lane.cells)
+                lane.llmlight_cells = [index * 456] * len(lane.llmlight_cells)
+                lane.vehicles = {"hidden-simulator-vehicle": index}
+        agent = VisualAgent(JevLightController(client, 15), cooperation=cooperation)
         for step in (0, 1):
-            agent.decide([observation], {"i0": views()}, step)
+            agent.decide(observations, {'a': views(), 'b': views()}, step)
     # Both stages and their visual history must be invariant to hidden traffic.
     assert clients[0].calls == clients[1].calls
 
@@ -225,17 +233,16 @@ def test_cooperation_routes_current_visual_answers_without_simulator_measurement
     _, traces = agent.decide([a, b], {'a': views(), 'b': views()}, 0)
     state = client.calls[2][0]
     co = state['cooperative_view']
-    assert co['possible_connections']['WT']['upstream'] == [
-        {'neighbour': 'neighbour_1', 'movement': 'ET'}]
-    assert co['neighbours']['neighbour_1']['visual_perception']['ET']['demand']['estimate'] == 'many'
-    assert co['neighbours']['neighbour_2']['visual_perception'] is None
-    assert len(co['neighbours']) == 2
-    assert 'current_phase' not in str(state) and '918273' not in str(state)
-    assert 'intersection_id' not in str(state)
+    assert co['WT']['upstream'] == [{
+        'intersection_id': 'b', 'lane': 'ET', 'current_phase': 'ELWL',
+        'visual_estimate': state['visual_perception']['ET'],
+    }]
+    assert co['WT']['downstream'] == []
+    assert '918273' not in str(state)
     assert all(t['visual_cooperation'] for t in traces)
 
 
-def test_cooperation_does_not_reuse_failed_neighbour_or_hidden_signal_state(monkeypatch):
+def test_cooperation_omits_failed_neighbour_perception_and_its_metadata(monkeypatch):
     monkeypatch.setattr('jevlight.visual_agent.uuid.uuid4', lambda: 'fixed-image-reference')
     clients = [VisualStub(fail_perception=True), VisualStub(fail_perception=True)]
     for index, client in enumerate(clients):
@@ -249,5 +256,52 @@ def test_cooperation_does_not_reuse_failed_neighbour_or_hidden_signal_state(monk
         agent = VisualAgent(JevLightController(client, 15), cooperation=True)
         agent.decide([a, b], {'a': views(), 'b': views()}, 0)
         co = client.calls[2][0]['cooperative_view']
-        assert co['neighbours']['neighbour_1']['visual_perception'] is None
+        assert co['WT']['upstream'] == []
     assert clients[0].calls == clients[1].calls
+
+
+@pytest.mark.parametrize('no_demand', ['none', 'unknown'])
+def test_unserved_history_accumulates_visual_demand_and_resets_only_when_served(no_demand):
+    class HistoryStub(VisualStub):
+        demand = 'many'
+        phase = 'NTST'
+
+        def evaluate(self, state, questions, assets=None):
+            result = super().evaluate(state, questions, assets)
+            if assets:
+                result.answers['ET_demand']['choice'] = self.demand
+            else:
+                result.answers = {key: phase_answer(self.phase) for key in questions}
+            return result
+
+    client = HistoryStub()
+    agent = VisualAgent(JevLightController(client, 15))
+    states = []
+    for step, (demand, phase) in enumerate((('many', 'NTST'), (no_demand, 'NTST'),
+                                            ('many', 'ETWT'), ('many', 'NTST'))):
+        client.demand, client.phase = demand, phase
+        _, traces = agent.decide([make_observation()], {'i0': views()}, step)
+        states.append(traces[0]['decision_state']['unserved_nonempty_observation_steps']['ETWT'])
+    assert states == [0, 1, 1, 0]
+    assert agent.unserved['i0']['ETWT'] == 1
+
+
+def test_official_and_all_three_open_models_receive_identical_context(monkeypatch):
+    from scripts.benchmark_vlalight_jev import OPEN_VISION_MODELS
+
+    clients = []
+    for transport, model in [('official', 'jev-1.14.0'), *[
+            ('local', model) for model in OPEN_VISION_MODELS.values()]]:
+        refs = count()
+        monkeypatch.setattr('jevlight.visual_agent.uuid.uuid4', lambda: str(next(refs)))
+        client = VisualStub()
+        client.transport, client.model = transport, model
+        agent = VisualAgent(JevLightController(client, 15), cooperation=True)
+        a, b = make_observation('a'), make_observation('b', current_phase='NL_SL')
+        a.lane_relations = {'WT': {'upstream': [{'intersection_id': 'b', 'lane': 'ET'}]}}
+        a.topology_available = True
+        for step in (0, 1):
+            agent.decide([a, b], {'a': views(), 'b': views()}, step)
+        clients.append(client)
+    assert len(clients) == 4
+    assert all(client.calls == clients[0].calls for client in clients[1:])

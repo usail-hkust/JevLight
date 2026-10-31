@@ -74,6 +74,7 @@ def valid_image_summary(case):
 def test_two_stage_image_agent_requires_two_requests_per_intersection():
     case = build_cases()[0]
     summary = {**valid_image_summary(case), "image_agent": "vlalight",
+               "visual_prompt_version": "vlalight-two-stage-v2",
                "jev": {"requests": case["image_requests_per_seed"] * 2, "failures": 0}}
     assert validate_summary(summary, case, 1, "jev-image") == "complete"
     summary["jev"]["requests"] -= 1
@@ -83,7 +84,7 @@ def test_two_stage_image_agent_requires_two_requests_per_intersection():
 def test_grouped_agent_requires_three_requests_and_rejects_uncalibrated_scenes():
     case = next(c for c in build_cases() if c['dataset'] == 'jinan')
     summary = {**valid_image_summary(case), 'image_agent': 'vlalight-grouped',
-               'visual_prompt_version': 'vlalight-jinan-opposite-v2',
+               'visual_prompt_version': 'vlalight-jinan-opposite-v3',
                'jev': {'requests': case['image_requests_per_seed'] * 3, 'failures': 0}}
     assert validate_summary(summary, case, 1, 'jev-image') == 'complete'
     assert validate_summary({**summary, 'visual_prompt_version': 'vlalight-jinan-opposite-v1'},

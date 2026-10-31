@@ -25,6 +25,7 @@ from scripts.benchmark_vlalight_jev import (build_cases, save_json, validate_sum
 from scripts.experiments.preparation_cases import FLOWS
 from jevlight.config import DATASETS
 from jevlight.simulation_checkpoint import OutputLease
+from jevlight.visual_agent import VISUAL_PROMPT_VERSION
 
 OFFICIAL = "jev-vision"
 SHARED = dict(start_time=0, count=3600, duration=15, eightphase=False,
@@ -86,7 +87,7 @@ def build_plan(open_models, endpoints=None, smoke=False):
                 if any("key" in name.lower() for name in config):
                     raise ValueError("Credentials must come from the environment or private vault")
                 overrides = dict(image_decisions=True, image_agent="vlalight", image_renderer="vlalight",
-                                 visual_cooperation=False, fail_on_image_fallback=True)
+                                 visual_cooperation=True, fail_on_image_fallback=True)
                 if model == OFFICIAL:
                     if config["jev_transport"] != "official" or config["jev_base_url"] != "https://api.typesafe.ai":
                         raise ValueError("Official Jev must use the TypeSafe endpoint")
@@ -107,7 +108,8 @@ def build_plan(open_models, endpoints=None, smoke=False):
                            case=dict(case, horizon_s=config["count"],
                                      image_requests_per_seed=case["intersections"] * (config["count"] // 15)))
                 jobs.append(job)
-    return dict(protocol="upstream-3600s-15s-visual-v2", stage="smoke" if smoke else "formal",
+    return dict(protocol="upstream-3600s-15s-visual-v3", stage="smoke" if smoke else "formal",
+                visual_prompt_version=VISUAL_PROMPT_VERSION + "-co",
                 shared_settings={**SHARED, "count": 30 if smoke else 3600},
                 open_models=list(open_models), source_hashes=sources, jobs=jobs,
                 official_logical_evaluations=sum(j["case"]["image_requests_per_seed"] * 2
@@ -154,7 +156,9 @@ def validate_run(job, summary_path):
     config_path = summary_path.with_name("experiment_config.json")
     config = json.loads(config_path.read_text(encoding="utf-8"))
     expected = job["effective_config"]
-    for key in (*SHARED, "seed", "dataset", "traffic_file", "jev_transport", "jev_model"):
+    for key in (*SHARED, "seed", "dataset", "traffic_file", "jev_transport", "jev_model",
+                "image_decisions", "image_agent", "image_renderer", "visual_cooperation",
+                "fail_on_image_fallback"):
         if config.get(key) != expected[key]:
             raise ValueError(f"Runtime configuration drifted: {key}")
     if summary.get("final/duration") != expected["count"]:
@@ -162,7 +166,8 @@ def validate_run(job, summary_path):
     if summary.get("mock_jev") or summary.get("dry_run") or summary.get("jev", {}).get("failures") != 0:
         raise ValueError("Mock, heuristic or failed model run is not a valid result")
     method = "jev-image" if job["model"] == OFFICIAL else job["model"]
-    if (summary.get("image_agent") != "vlalight" or summary.get("visual_cooperation") is not False
+    if (summary.get("image_agent") != "vlalight" or summary.get("visual_cooperation") is not True
+            or summary.get("visual_prompt_version") != VISUAL_PROMPT_VERSION + "-co"
             or validate_summary(summary, job["case"], job["seed"], method) != "complete"):
         raise ValueError("Visual model integrity check failed")
     for field in ("traffic_sha256", "roadnet_sha256"):
@@ -175,6 +180,9 @@ def validate_run(job, summary_path):
             row = json.loads(line)
             if row.get("error") or row.get("fallback") not in (None, "empty_junction_local_ranking"):
                 raise ValueError("Failed or fallback model decision")
+            if (row.get("prompt_version") != VISUAL_PROMPT_VERSION + "-co"
+                    or row.get("visual_cooperation") is not True):
+                raise ValueError("Visual decision protocol drifted")
             rows += 1
     if rows != job["case"]["image_requests_per_seed"]:
         raise ValueError("Incomplete per-intersection decision trace")

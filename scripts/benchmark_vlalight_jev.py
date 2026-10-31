@@ -180,8 +180,12 @@ def validate_summary(summary, case, seed, method, model=None):
         return "invalid_method"
     if image_agent == 'vlalight-grouped' and case['dataset'] != 'jinan':
         return 'invalid_method'
-    if image_agent == 'vlalight-grouped' and summary.get('visual_prompt_version') != 'vlalight-jinan-opposite-v2':
-        return 'invalid_method'
+    if image_agent in ('vlalight', 'vlalight-grouped'):
+        from jevlight.visual_agent import VisualAgent, JinanGroupedVisualAgent
+        agent = JinanGroupedVisualAgent if image_agent == 'vlalight-grouped' else VisualAgent
+        expected = agent.prompt_version + ('-co' if summary.get('visual_cooperation') else '')
+        if summary.get('visual_prompt_version') != expected:
+            return 'invalid_method'
     if summary.get("renderer_metadata", {}).get("revision") != RENDERER_REVISION:
         return "invalid_method"
     expected_mock = method == "smoke"
@@ -364,6 +368,8 @@ def main():
                 command += ["--mock_jev"]
         if args.method != "maxpressure":
             command += ["--image_agent", args.image_agent]
+            if args.image_agent in ("vlalight", "vlalight-grouped"):
+                command += ["--visual_cooperation"]
         log_dir = ROOT / "logs" / "benchmark_vlalight" / args.method / args.image_agent / case["dataset"]
         log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%dT%H%M%S_%f")

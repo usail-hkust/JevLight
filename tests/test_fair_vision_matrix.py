@@ -22,6 +22,8 @@ def test_all_84_conditions_share_the_upstream_baseline_environment(plan):
     for job in plan["jobs"]:
         command = matrix.command_for(job, "test")
         args = run_jevlight.parse_args(command[3:])
+        assert args.visual_cooperation is True
+        assert "--visual_cooperation" in command
         for key, expected in matrix.SHARED.items():
             assert getattr(args, key) == expected, (job["id"], key)
         dataset = setup_dataset_config(args.dataset)
@@ -36,6 +38,8 @@ def test_all_84_conditions_share_the_upstream_baseline_environment(plan):
         assert actual == expected, job["id"]
     for model in (matrix.OFFICIAL, *plan["open_models"]):
         assert len([j for j in plan["jobs"] if j["model"] == model]) == 21
+    assert plan['visual_prompt_version'] == 'vlalight-two-stage-v2-co'
+    assert plan['protocol'] == 'upstream-3600s-15s-visual-v3'
 
 
 def test_plan_mode_never_starts_a_process_or_sends_a_request(plan, monkeypatch, tmp_path):
@@ -107,6 +111,43 @@ def test_resume_requires_unchanged_evidence(tmp_path):
     path.write_text("changed")
     assert not matrix.reusable(record)
     assert not matrix.reusable(dict(status="complete", artifacts={}))
+
+
+@pytest.mark.parametrize('drift', ['config', 'summary_cooperation', 'summary_version', 'trace'])
+def test_validation_rejects_results_without_the_aligned_visual_policy(plan, tmp_path, drift):
+    from tests.test_vlalight_benchmark import valid_image_summary
+
+    job = plan['jobs'][0]
+    summary = valid_image_summary(job['case'])
+    summary.update(image_agent='vlalight', visual_cooperation=True,
+                   visual_prompt_version=plan['visual_prompt_version'])
+    summary['jev']['requests'] *= 2
+    summary['final/duration'] = job['effective_config']['count']
+    summary.update({'final/' + key: 1 for key in matrix.METRICS})
+    config = deepcopy(job['effective_config'])
+    row = dict(error=None, fallback=None, prompt_version=plan['visual_prompt_version'],
+               visual_cooperation=True)
+    path = tmp_path / 'summary.json'
+
+    def save():
+        matrix.save_json(path, summary)
+        matrix.save_json(path.with_name('experiment_config.json'), config)
+        path.with_name('jev_decisions.jsonl').write_text(
+            (json.dumps(row) + '\n') * job['case']['image_requests_per_seed'], encoding='utf-8')
+
+    save()
+    assert matrix.validate_run(job, path)['values']['avg_waiting_time'] == 1
+    if drift == 'config':
+        config['visual_cooperation'] = False
+    elif drift == 'summary_cooperation':
+        summary['visual_cooperation'] = False
+    elif drift == 'summary_version':
+        summary['visual_prompt_version'] = 'vlalight-two-stage-v1'
+    else:
+        row['prompt_version'] = 'vlalight-two-stage-v1'
+    save()
+    with pytest.raises(ValueError, match='drifted|integrity'):
+        matrix.validate_run(job, path)
 
 
 def test_execution_takes_a_lock_before_network_or_subprocesses(plan, monkeypatch, tmp_path):

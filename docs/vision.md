@@ -13,17 +13,40 @@ agent, renderer, questions, control loop and metrics.
    controlled movements. After the first step, the preceding step's four images
    are included too, for at most eight images per request.
 2. Decision: the model chooses one of four phases using its visual estimates,
-   the controller's previous signal and elapsed control information.
+   current upstream/downstream visual estimates, known signal phases, unserved
+   demand history and the control interval/yellow-time parameters.
 
 SUMO vehicle positions are used to render the scene. Simulator queue counts,
-waiting times, occupancies and dynamic neighbour measurements are not supplied
+waiting times, occupancies and measured neighbour traffic states are not supplied
 to the model. The implementation borrows VLALight's renderer and two-stage
 perception/decision idea; it does not reproduce the paper's six-frame video or
 fast/slow inference switching.
 
-The shared matrix disables visual cooperation. The optional
-`--visual_cooperation` path routes camera-derived estimates using static lane
-connections; it does not read neighbours' queues from SUMO. The experimental
+The shared matrix enables `--visual_cooperation` for official Jev and all three
+open models. For each local movement it routes the connected neighbours'
+camera-derived demand/queue/trend estimates and confidence, intersection ID,
+movement and current signal phase. Connections come from the static SUMO road
+network; current phases come from the environment's control state. No SUMO
+vehicle counts, queues, waiting times or occupancies enter either model stage.
+Missing or failed neighbour perceptions are omitted and treated as unknown.
+
+The decision also receives `count_buckets`, the current phase, the 15-second
+control interval, 5-second yellow time and 10-second green time if switching.
+`unserved_nonempty_observation_steps` counts visual nonempty observations since
+a phase was last selected: an unselected phase increments when either of its
+movements has visible demand; selecting it resets the counter. Empty/unknown
+observations leave the counter unchanged. This is not measured vehicle waiting
+time, and it does not enforce a maximum red time.
+
+These inputs and the cooperative decision instructions restore the method used
+by the historical official visual experiment for all four model backends. The
+prompt is versioned `vlalight-two-stage-v2-co` and the matrix protocol is
+`upstream-3600s-15s-visual-v3`. Earlier results used a different policy and cannot
+be reused as results of this version. Direct `run_jevlight` users must supply
+`--visual_cooperation` to enable routing; `--no-visual_cooperation` is available
+for a local-only comparison while retaining control context and history.
+
+The experimental
 `vlalight-grouped` agent uses lane masks calibrated only for Jinan 3_4 and is not
 part of the shared four-model matrix. The older `--image_agent direct` path
 instead asks a phase question against one composite camera image.
@@ -181,6 +204,9 @@ a new attempt. Frozen plans bind code, configs and traffic hashes; do not edit
 them to reuse a different implementation's results. Completion records contain
 absolute artifact paths, so copying only `completed/` to another machine does
 not provide portable resume. Preserve original results for separate aggregation.
+After changing the policy, use a fresh checkout/output directory rather than
+editing an old plan. The fixed server launcher uses `results/vision_server`;
+it refuses to mix a previous policy's results with this one.
 
 Tests cover protocol, baseline configuration equality, adapters and resume
 integrity without paid requests. GPU execution, dependencies and performance
