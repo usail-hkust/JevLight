@@ -76,6 +76,60 @@ def test_composite_preserves_crop_and_all_four_views():
         assert output.getpixel((x, y)) == (value, value, value)
 
 
+@pytest.mark.parametrize('draw_stage', [0, 1, 2])
+def test_capture_reads_current_batch_after_camera_and_vehicle_updates(tmp_path, draw_stage):
+    """A finished draw can still contain a previous camera's queued scene."""
+    from collections import deque
+
+    class Pipeline:
+        def __init__(self):
+            self.pending = deque([0] * draw_stage)
+            self.current = self.visible = 0
+
+        def getThreadingModel(self):
+            return SimpleNamespace(getDrawStage=lambda: draw_stage)
+
+        def renderFrame(self):
+            self.pending.append(self.current)
+            self.visible = self.pending.popleft()
+
+        def syncFrame(self):
+            pass  # Waiting for Draw does not advance the pipeline.
+
+    engine = Pipeline()
+    identities = ['first', 'second']
+    batch = [0]
+
+    def collect(_):
+        identity = identities[batch[0]]
+        return {f'{identity}_{i}': {'junction_front_all':
+                    np.full((108, 192, 3), engine.visible, dtype=np.uint8)}
+                for i in range(4)}
+
+    def step(*args, **kwargs):
+        engine.current = 80 + batch[0] * 80
+        engine.renderFrame()
+
+    renderer = VLALightRenderer(tmp_path, {'template': 'Jinan', 'road_net': '3_4'},
+                               'network.xml', tmp_path)
+    renderer.labels = {identity: list(VIEW_LABELS) for identity in identities}
+    renderer.centers = dict.fromkeys(identities, (0, 0))
+    renderer.renderer = SimpleNamespace(
+        get_batch_info=lambda: {'total_batches': 2},
+        switch_to_batch=lambda index: batch.__setitem__(0, index),
+        get_current_batch_tls_ids=lambda: [identities[batch[0]]], step=step,
+        _showbase_instance=SimpleNamespace(graphicsEngine=engine),
+        scene_sync=SimpleNamespace(collect_sensors=collect, _current_batch_tls_elements=lambda: {}))
+    conn = SimpleNamespace(vehicle=SimpleNamespace(getIDList=lambda: []))
+    for decision_step in (0, 1):
+        paths = renderer.capture(conn, identities, decision_step, separate_views=True)
+        for index, identity in enumerate(identities):
+            from PIL import Image
+            with Image.open(paths[identity][0]) as picture:
+                assert all(abs(value - (80 + index * 80)) <= 1
+                           for value in picture.getpixel((192, 360)))
+
+
 def test_image_titles_use_vlalight_vehicle_travel_direction():
     assert VIEW_LABELS == {'NORTHBOUND': 'NORTH', 'SOUTHBOUND': 'SOUTH',
                            'EASTBOUND': 'EAST', 'WESTBOUND': 'WEST'}

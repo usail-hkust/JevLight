@@ -226,6 +226,7 @@ class VLALightRenderer:
             )
             self._add_lane_arrows()
             self.renderer.reset(init)
+            self.metadata['frame_readback'] = 'current-batch-pipeline-flush-v1'
         # Read once without modifying subscriptions or advancing the simulation.
         snapshot = {vid: {"vehicle_type": conn.vehicle.getTypeID(vid),
                           "position": conn.vehicle.getPosition(vid),
@@ -242,9 +243,12 @@ class VLALightRenderer:
                 (value["position"][1] - self.centers[tls][1]) ** 2 <= 200 ** 2
                 for tls in current_ids)}
             self.renderer.step({"vehicle": vehicles}, should_count_vehicles=False)
-            # The original Windows backend draws asynchronously; read after the
-            # fence so camera reuse cannot return the previous junction's pixels.
-            self.renderer._showbase_instance.graphicsEngine.syncFrame()
+            # syncFrame waits for Draw, but does not move the new camera/vehicle
+            # state through Cull/Draw's queued stages when sensors are reused.
+            engine = self.renderer._showbase_instance.graphicsEngine
+            for _ in range(engine.getThreadingModel().getDrawStage()):
+                engine.renderFrame()
+            engine.syncFrame()
             sync = self.renderer.scene_sync
             images = sync.collect_sensors(sync._current_batch_tls_elements())
             for tls in current_ids:
