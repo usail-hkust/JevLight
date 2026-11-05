@@ -25,6 +25,14 @@ def test_invalid_checkpoint_operations_rejected(flags):
         runner.parse_args(flags)
 
 
+def test_resume_startup_path_fits_windows_legacy_limit(tmp_path):
+    run_directory = tmp_path / ('x' * max(1, 195 - len(str(tmp_path))))
+    startup = runner.create_resume_startup_directory(run_directory)
+    route_path = startup / 'anon_4_4_hangzhou_real_5816.rou.xml'
+    assert startup.is_dir()
+    assert len(str(route_path)) < 260
+
+
 @pytest.mark.parametrize('error', [FileNotFoundError('sumo missing'),
                                   RuntimeError('libXrender loader error')])
 def test_runtime_failure_precedes_output_planning_or_sumo(monkeypatch, error):
@@ -37,6 +45,20 @@ def test_runtime_failure_precedes_output_planning_or_sumo(monkeypatch, error):
     args = runner.parse_args(['--mock_jev', '--jev_transport', 'local',
                              '--checkpoint_every_steps', '2'])
     with pytest.raises(type(error), match=str(error)):
+        runner.run(args)
+
+
+def test_official_visual_checkpoint_reaches_runtime_validation(monkeypatch):
+    import jevlight.simulation_checkpoint as core
+    def stop_before_outputs():
+        raise RuntimeError('runtime checked for official visual checkpoint')
+    monkeypatch.setattr(core, 'runtime_identity', stop_before_outputs)
+    monkeypatch.setattr(runner, 'build_configs', lambda *a: pytest.fail('Outputs planned'))
+    args = runner.parse_args(['--jev_transport', 'official', '--jev_api_key', 'test-only',
+                             '--image_decisions', '--image_agent', 'vlalight',
+                             '--image_renderer', 'vlalight',
+                             '--checkpoint_every_steps', '1'])
+    with pytest.raises(RuntimeError, match='runtime checked for official visual checkpoint'):
         runner.run(args)
 
 

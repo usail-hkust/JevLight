@@ -82,15 +82,18 @@ def test_runtime_mismatch_preserves_uncommitted_tail(checkpoint, component):
 
 def test_runtime_probe_binds_actual_binary_and_preserves_loader_error(tmp_path, monkeypatch):
     from jevlight.simulation_checkpoint import runtime_identity
-    binary = tmp_path / 'sumo'
-    binary.write_text('#!/bin/sh\necho "SUMO test build"\n')
+    binary = tmp_path / ('sumo.cmd' if os.name == 'nt' else 'sumo')
+    binary.write_text('@echo off\necho SUMO test build\n' if os.name == 'nt'
+                      else '#!/bin/sh\necho "SUMO test build"\n')
     binary.chmod(0o755)
     monkeypatch.setenv('PATH', str(tmp_path))
     identity = runtime_identity()
     assert identity['sumo']['binary'] == {str(binary.resolve()): sha256(binary)}
     assert identity['sumo']['version'] == 'SUMO test build'
     assert identity['dependencies']['traci']['version']
-    binary.write_text('#!/bin/sh\necho "libXrender original loader failure" >&2\nexit 127\n')
+    binary.write_text('@echo off\necho libXrender original loader failure >&2\nexit /b 127\n'
+                      if os.name == 'nt' else
+                      '#!/bin/sh\necho "libXrender original loader failure" >&2\nexit 127\n')
     with pytest.raises(RuntimeError, match='libXrender original loader failure'):
         runtime_identity()
     binary.unlink()
@@ -127,6 +130,14 @@ def test_failed_generation_does_not_replace_last_commit(checkpoint):
     assert SimulationCheckpoint(root, identity=kwargs['identity']).state['loop']['step'] == 2
 
 
+def test_checkpoint_round_trip_under_long_windows_run_path(checkpoint, tmp_path):
+    _, kwargs, _ = checkpoint
+    root = tmp_path / ('x' * max(1, 205 - len(str(tmp_path)))) / 'checkpoints'
+    generation = save_checkpoint(root, **kwargs)
+    assert len(str(generation / 'manifest.json')) < 260
+    assert SimulationCheckpoint(root, identity=kwargs['identity']).state['loop']['step'] == 2
+
+
 def test_restore_checks_before_python_state_changes(checkpoint):
     root, kwargs, _ = checkpoint
     cp = SimulationCheckpoint(root, identity=kwargs['identity'])
@@ -145,6 +156,29 @@ def test_restore_recovers_loop_and_controller_at_same_time(checkpoint):
     assert loop == {'step': 2, 'total_reward': -3}
     assert kwargs['controller'].previous_signals == 0
     assert kwargs['env'].current_time == 31
+
+
+def test_visual_history_and_starvation_counters_survive_restart(checkpoint):
+    root, kwargs, trace = checkpoint
+    image = trace.with_name('last-view.jpg')
+    image.write_bytes(b'committed image')
+    agent = SimpleNamespace(prompt_version='visual-v2-co', cooperation=True,
+                            unserved={'tls': {'ETWT': 7}}, last_step=1,
+                            previous_views={'tls': (1, [image])})
+    save_checkpoint(root, **kwargs, visual_agent=agent)
+    cp = SimulationCheckpoint(root, identity=kwargs['identity'])
+    restored = SimpleNamespace(prompt_version=agent.prompt_version, cooperation=True,
+                               unserved={}, previous_views={}, last_step=None)
+    cp.restore_python(env=kwargs['env'], controller=kwargs['controller'], visual_agent=restored)
+    assert restored.unserved == agent.unserved
+    assert restored.previous_views == {'tls': (1, [image.resolve()])}
+    assert restored.last_step == 1
+    restored.cooperation = False
+    with pytest.raises(ValueError, match='Visual agent checkpoint policy'):
+        cp.restore_python(env=kwargs['env'], controller=kwargs['controller'], visual_agent=restored)
+    image.write_bytes(b'corrupted image')
+    with pytest.raises(ValueError, match='append boundary'):
+        SimulationCheckpoint(root, identity=kwargs['identity'])
 
 
 def test_environment_configuration_mismatch_rejected(checkpoint):

@@ -43,7 +43,7 @@ import argparse
 from contextlib import ExitStack
 import copy
 import hashlib
-import uuid
+import tempfile
 import json
 import os
 import platform
@@ -163,6 +163,8 @@ def parse_args(argv=None):
         default=3,
         help="Retry attempts on rate-limit/network errors (default: 3)",
     )
+    parser.add_argument("--retry_transient_forever", action="store_true",
+                        help="For image decisions, keep retrying transient System One failures until success")
     parser.add_argument(
         "--jev_min_interval",
         type=float,
@@ -479,6 +481,12 @@ def calculate_metrics(env, total_reward, namespace="final"):
     return metrics
 
 
+def create_resume_startup_directory(run_directory: Path) -> Path:
+    root = run_directory / '.r'
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(dir=root))
+
+
 def build_wandb_group(dataset_config, env_config, traffic_file):
     traffic_file_str = traffic_file.split(".")[0]
     phase_count = len(env_config.get("PHASE", {}))
@@ -578,7 +586,8 @@ def _run(args, resources):
     service_identity = None
     if checkpoint_enabled and args.dry_run:
         raise ValueError('Checkpoint entrypoint requires a Jev model client')
-    if checkpoint_enabled and not args.mock_jev:
+    visual_checkpoint = args.image_decisions and args.image_agent == 'vlalight'
+    if checkpoint_enabled and not args.mock_jev and not visual_checkpoint:
         if args.jev_transport != 'local' or not args.jev_batch_size:
             raise ValueError('Live checkpoint requires local complete-step batch transport')
         from jevlight.service_identity import probe_service_identity, resume_identity
@@ -601,10 +610,14 @@ def _run(args, resources):
     if checkpoint_enabled:
         env_config['CHECKPOINT_STATE_ENABLED'] = True
         parameters = {k: v for k, v in experiment_parameters(args).items()
-                      if k not in {'resume_from', 'archive_resume_tails', 'checkpoint_every_steps'}}
+                      if k not in {'resume_from', 'archive_resume_tails', 'checkpoint_every_steps',
+                                   'retry_transient_forever'}}
         identity = {'parameters': parameters, 'run_id': run_id,
                     'run_directory': str(run_directory),
-                    'backend': resume_identity(service_identity) if service_identity else 'mock-no-GPU',
+                    'backend': (resume_identity(service_identity) if service_identity else
+                                {'transport': args.jev_transport, 'model': args.jev_model,
+                                 'base_url': args.jev_base_url} if visual_checkpoint and not args.mock_jev
+                                else 'mock-no-GPU'),
                     'runtime': runtime,
                     'files': file_identity([traffic_path, roadnet_path, __file__,
                         *Path('jevlight').rglob('*.py'), *Path('utils').rglob('*.py')])}
@@ -623,7 +636,7 @@ def _run(args, resources):
     if checkpoint:
         # SUMO/intersection construction writes headers: isolate these writes
         # until restoration validates the fresh process and all Python state.
-        startup = run_directory / '.resume-startups' / uuid.uuid4().hex
+        startup = create_resume_startup_directory(run_directory)
         paths['PATH_TO_WORK_DIRECTORY'] = str(startup)
         paths['PATH_TO_MODEL'] = str(startup / 'model')
         paths['PATH_TO_ERROR'] = str(startup / 'errors')
@@ -655,6 +668,7 @@ def _run(args, resources):
             base_url=args.jev_base_url,
             timeout=args.jev_timeout,
             max_retries=args.jev_retries,
+            retry_transient_forever=args.retry_transient_forever,
             min_interval=min_interval,
             mock=args.mock_jev,
             batch_size=args.jev_batch_size,
@@ -698,7 +712,7 @@ def _run(args, resources):
     image_renderer = None
     visual_agent = None
     if args.image_decisions:
-        frame_dir = Path(paths["PATH_TO_WORK_DIRECTORY"]) / "vision_frames"
+        frame_dir = run_directory / "vision_frames"
         if args.image_renderer == "vlalight":
             from jevlight.vlalight_images import VLALightRenderer
             image_renderer = resources.enter_context(VLALightRenderer(
@@ -779,6 +793,7 @@ def _run(args, resources):
                 "jev_transport": None if args.dry_run else args.jev_transport,
                 "jev_model": None if args.dry_run else args.jev_model,
                 "jev_retry_limit": None if args.dry_run else args.jev_retries,
+                "jev_retry_transient_forever": args.retry_transient_forever,
                 "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,
@@ -801,11 +816,14 @@ def _run(args, resources):
     step = 0
     done = False
     if checkpoint:
-        loop = checkpoint.restore_python(env=env, controller=controller, recorder=rolling_recorder)
+        loop = checkpoint.restore_python(env=env, controller=controller, recorder=rolling_recorder,
+                                         visual_agent=visual_agent)
+        teleport_counter.count = loop.get('teleport_count', 0)
         step, total_reward, done, max_steps = (loop[k] for k in
                                              ('step', 'total_reward', 'done', 'max_steps'))
         evaluation_start_time = loop['evaluation_start_time']
         simulation_end_time = loop['simulation_end_time']
+        wall_started -= loop.get('wall_elapsed_s', 0)
         for inter in env.list_intersection:
             original = run_directory / Path(inter.log_file_path).name
             if env_config.get('ENABLE_DETAILED_LOGGING', True):
@@ -864,9 +882,12 @@ def _run(args, resources):
                         append_paths.append(window_path)
                     save_checkpoint(run_directory / 'checkpoints', env=env, controller=controller,
                         recorder=rolling_recorder, identity=identity, append_paths=append_paths,
+                        visual_agent=visual_agent,
                         loop={'step': step, 'total_reward': total_reward, 'done': done,
                               'max_steps': max_steps, 'evaluation_start_time': evaluation_start_time,
-                              'simulation_end_time': simulation_end_time})
+                              'simulation_end_time': simulation_end_time,
+                              'teleport_count': teleport_counter.count,
+                              'wall_elapsed_s': time.perf_counter() - wall_started})
                     print(f'[CHECKPOINT] step={step} directory={run_directory / "checkpoints"}', flush=True)
                 simulated_elapsed = current_time - evaluation_start_time
                 usage = controller.usage_summary()
@@ -933,6 +954,7 @@ def _run(args, resources):
                 "jev_transport": None if args.dry_run else args.jev_transport,
                 "jev_model": None if args.dry_run else args.jev_model,
                 "jev_retry_limit": None if args.dry_run else args.jev_retries,
+                "jev_retry_transient_forever": args.retry_transient_forever,
                 "packaging": packaging,
                 "fallback": args.fallback,
                 "min_confidence": args.min_confidence,

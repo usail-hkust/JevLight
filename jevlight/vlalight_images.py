@@ -14,6 +14,49 @@ from jevlight.images import prune_frames
 
 SCENES = {("Jinan", "3_4"): "Jinan", ("Hangzhou", "4_4"): "Hangzhou",
           ("NewYork", "28_7"): "NewYork", ("NewYork", "16x3"): "NewYork16x3"}
+VIEW_LABELS = {"NORTHBOUND": "NORTH", "EASTBOUND": "EAST",
+               "SOUTHBOUND": "SOUTH", "WESTBOUND": "WEST"}
+TITLE_HEIGHT = 42
+TITLE_FONT_SIZE = 30
+
+
+def lane_arrow_data(roadnet):
+    """Static permitted movements only; never read live vehicle or queue state."""
+    from sumolib.net import readNet
+    directions = {"l": "left", "s": "straight", "r": "right"}
+    result = []
+    for edge in readNet(str(roadnet)).getEdges():
+        lanes = edge.getLanes()
+        for lane in lanes:
+            turns = sorted({directions[link.getDirection()] for link in lane.getOutgoing()
+                            if link.getTLSID() and link.getDirection() in directions})
+            shape = lane.getShape()
+            if len(shape) >= 2:
+                result.extend((shape, turn, lane.getWidth(), lane.getIndex(), len(lanes))
+                              for turn in turns)
+    if not result:
+        raise ValueError("No signal-controlled lane arrows found in the static road network")
+    return result
+
+
+def configure_gltf_loader():
+    """Never let Assimp reinterpret the pinned GLB scene's coordinate axes."""
+    try:
+        from gltf import __version__
+        from gltf._loader import GltfLoader
+    except ImportError as exc:
+        raise RuntimeError(
+            "VLALight rendering requires panda3d-gltf==1.3.0 in this Python environment; "
+            "install scripts/vision_runner_requirements.txt before rendering. "
+            "Refusing the Assimp fallback, which can rotate roads out of the ground plane."
+        ) from exc
+    from panda3d.core import BamCache, LoaderFileTypeRegistry, ModelPool
+    LoaderFileTypeRegistry.getGlobalPtr().register_type(GltfLoader)
+    # BAM/model-pool entries do not distinguish Assimp from the glTF loader.
+    BamCache.getGlobalPtr().setCacheModels(False)
+    ModelPool.releaseAllModels()
+    return {"asset_loader": "panda3d-gltf", "asset_loader_version": __version__,
+            "asset_model_cache": "memory-only-v1"}
 
 
 def isolate_jinan_movements(state, questions, assets, output_dir):
@@ -40,7 +83,7 @@ def isolate_jinan_movements(state, questions, assets, output_dir):
                     return round(left + fraction * (center - left))
                 mask = Image.new('L', image.size, 0)
                 draw = ImageDraw.Draw(mask)
-                draw.rectangle((0, 0, 383, 27), fill=255)
+                draw.rectangle((0, 0, 383, TITLE_HEIGHT - 1), fill=255)
                 # SUMO lane 2 is beside the centerline; curbside lane 0 turns right.
                 intervals = ((2/3, 1),) if suffix == 'L' else ((1/3, 2/3),)
                 for start, end in intervals:
@@ -95,8 +138,8 @@ def compose_views(views, labels):
         image = image.crop((int(width * .4), 0, int(width * .7), height))
         image = image.resize((384, 720), Image.Resampling.LANCZOS)
         draw = ImageDraw.Draw(image)
-        draw.rectangle((0, 0, 384, 28), fill="black")
-        draw.text((8, 4), label, fill="white", font_size=19)
+        draw.rectangle((0, 0, 383, TITLE_HEIGHT - 1), fill="black")
+        draw.text((8, 4), VIEW_LABELS.get(label, label), fill="yellow", font_size=TITLE_FONT_SIZE)
         canvas.paste(image, ((index % 2) * 384, (index // 2) * 720))
     return canvas
 
@@ -122,7 +165,10 @@ class VLALightRenderer:
         self.metadata = {"renderer": "VLALight/TransSimHub/Panda3D", "scene": SCENES[key],
                          "preset": "1080P", "camera_height_m": 30, "radius_m": 200,
                          "tile_size": [384, 720], "composite_size": [768, 1440],
-                         "crop_left": .4, "crop_right": .3, "batch_size": batch_size}
+                         "crop_left": .4, "crop_right": .3, "batch_size": batch_size,
+                         "annotations": "travel-direction-and-lane-arrows-v3",
+                         "title_height_px": TITLE_HEIGHT, "title_font_px": TITLE_FONT_SIZE,
+                         "view_labels": VIEW_LABELS, "lane_arrows": True}
 
     def __enter__(self):
         if not self.scene_dir.is_dir():
@@ -132,6 +178,7 @@ class VLALightRenderer:
             raise FileNotFoundError("Pinned renderer manifest missing; use scripts/fetch_vlalight_renderer.py")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.metadata.update(repository=manifest["repository"], revision=manifest["revision"])
+        self.metadata.update(configure_gltf_loader())
         sys.path.insert(0, str(self.source_root))
         from TransSimHub.tshub.tshub_env3d.vis3d_renderer.tshub_render import TSHubRenderer
         from loguru import logger
@@ -140,6 +187,27 @@ class VLALightRenderer:
         self.renderer_class = TSHubRenderer
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return self
+
+    def _add_lane_arrows(self):
+        from TransSimHub.tshub.tshub_env3d.vis3d_sumonet_convert.element_to_glb.arrows_glb import make_arrows_glb
+        from TransSimHub.tshub.tshub_env3d.vis3d_utils.masks import CamMask
+        from panda3d.core import Filename
+        arrows = lane_arrow_data(self.roadnet)
+        path = self.output_dir / "lane_arrows.glb"
+        make_arrows_glb(arrows).write_glb(path)
+        node = self.renderer._showbase_instance.loader.loadModel(
+            Filename.fromOsSpecific(str(path.resolve())), noCache=True)
+        if node is None or node.isEmpty():
+            raise RuntimeError("Failed to load static lane arrows")
+        node.reparentTo(self.renderer._root_np)
+        node.hide(CamMask.AllOn)
+        node.show(CamMask.MapMask)
+        node.setShaderOff(20)
+        node.setLightOff(20)
+        node.setColor(1, 1, 1, 1)
+        # Road markings remain behind vehicles, rather than painting through them.
+        node.setDepthOffset(1)
+        self.metadata["lane_arrow_movements"] = len(arrows)
 
     def capture(self, conn, tls_ids, step, separate_views=False):
         tls_ids = list(tls_ids)
@@ -153,8 +221,10 @@ class VLALightRenderer:
                 render_mode="offscreen", rendering_backend="pandagl", show_buildings=False,
                 tls_batch_size=self.batch_size, keep_batch_sensors=False,
                 reuse_batch_sensors=True, step_task_manager=False,
+                # Generate marks consistently: upstream has no bundled arrows for some cities.
                 netxml_path=str(self.roadnet), show_arrows=False,
             )
+            self._add_lane_arrows()
             self.renderer.reset(init)
         # Read once without modifying subscriptions or advancing the simulation.
         snapshot = {vid: {"vehicle_type": conn.vehicle.getTypeID(vid),

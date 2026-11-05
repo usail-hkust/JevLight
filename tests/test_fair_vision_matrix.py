@@ -23,6 +23,7 @@ def test_all_84_conditions_share_the_upstream_baseline_environment(plan):
         command = matrix.command_for(job, "test")
         args = run_jevlight.parse_args(command[3:])
         assert args.visual_cooperation is True
+        assert args.retry_transient_forever is True
         assert "--visual_cooperation" in command
         for key, expected in matrix.SHARED.items():
             assert getattr(args, key) == expected, (job["id"], key)
@@ -239,3 +240,58 @@ def test_resume_skips_verified_seeds_and_only_runs_unfinished(plan, monkeypatch,
         assert len(commands) == 1
         assert "config/jev-api/jevlight_jinan-1_s2.json" in commands[0]
         assert json.loads((output / "completed/wemm-jev_jinan-1_s1.json").read_text())["status"] == "complete"
+
+
+def test_resume_keeps_original_memo_and_only_selects_committed_snapshots(plan, monkeypatch, tmp_path):
+    monkeypatch.setattr(matrix, 'ROOT', tmp_path)
+    output = tmp_path / 'results/campaign/formal'
+    attempt = output / 'attempts/jev-vision_jinan-1_s1_attempt'
+    attempt.mkdir(parents=True)
+    matrix.save_json(output / 'plan.json', plan)
+    job = next(j for j in plan['jobs'] if j['id'] == 'jev-vision_jinan-1_s1')
+    record = dict(plan_sha256=matrix.digest(output / 'plan.json'),
+                  effective_config={'memo': 'original-memo'})
+    matrix.save_json(attempt / 'record.json', record)
+    assert matrix.resumable_attempt(output, job) is None
+    checkpoint = tmp_path / 'results/jev-api/original-memo/run/checkpoints'
+    checkpoint.mkdir(parents=True)
+    (checkpoint / 'latest.json').write_text('{}')
+    assert matrix.resumable_attempt(output, job) == (attempt, record, checkpoint)
+    record['plan_sha256'] = 'different-code'
+    matrix.save_json(attempt / 'record.json', record)
+    assert matrix.resumable_attempt(output, job) is None
+
+
+def test_matrix_resume_dispatches_checkpoint_without_resetting_logs(plan, monkeypatch, tmp_path):
+    monkeypatch.setattr(matrix, 'ROOT', tmp_path)
+    monkeypatch.setattr(matrix, 'build_plan', lambda *a: plan)
+    monkeypatch.setattr(matrix, 'source_hashes', lambda: plan['source_hashes'])
+    monkeypatch.setattr(matrix, 'unchanged_inputs', lambda job: True)
+    monkeypatch.setattr(matrix, 'check_image_api', lambda *a, **kw: None)
+    output = tmp_path / 'results/campaign/formal'
+    attempt = output / 'attempts/jev-vision_jinan-1_s1_previous'
+    attempt.mkdir(parents=True)
+    matrix.save_json(output / 'plan.json', plan)
+    matrix.save_json(attempt / 'record.json', dict(
+        plan_sha256=matrix.digest(output / 'plan.json'), started_at='original-start',
+        effective_config={'memo': 'original-memo'}))
+    (attempt / 'runner.log').write_text('previous segment\n')
+    checkpoint = tmp_path / 'results/jev-api/original-memo/run/checkpoints'
+    checkpoint.mkdir(parents=True)
+    (checkpoint / 'latest.json').write_text('{}')
+    commands = []
+    def interrupted(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=1)
+    monkeypatch.setattr(matrix.subprocess, 'run', interrupted)
+    with pytest.raises(SystemExit):
+        matrix.main(['--models', matrix.OFFICIAL, '--flows', 'jinan-1', '--seeds', '1',
+                     '--resume', '--execute', '--output', str(output.parent)])
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[command.index('--memo') + 1] == 'original-memo'
+    assert command[command.index('--resume_from') + 1] == str(checkpoint)
+    assert command[command.index('--checkpoint_every_steps') + 1] == '1'
+    assert '--archive_resume_tails' in command
+    assert (attempt / 'runner.log').read_text() == 'previous segment\n'
+    assert json.loads((attempt / 'record.json').read_text())['resume_count'] == 1

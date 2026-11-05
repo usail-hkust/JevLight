@@ -90,6 +90,7 @@ class JevClient:
         base_url: Optional[str] = None,
         timeout: float = 120.0,
         max_retries: int = 3,
+        retry_transient_forever: bool = False,
         min_interval: float = 0.0,
         mock: bool = False,
         batch_size: int = 0,
@@ -109,6 +110,7 @@ class JevClient:
         )
         self.timeout = float(timeout)
         self.max_retries = max(0, int(max_retries))
+        self.retry_transient_forever = bool(retry_transient_forever)
         self.min_interval = max(0.0, float(min_interval))
         self.mock = mock
         self.batch_size = int(batch_size)
@@ -235,6 +237,7 @@ class JevClient:
                         client = JevClient(transport="official", model=self.model,
                                            api_key=key["secret"], base_url=self.base_url,
                                            timeout=self.timeout, max_retries=self.max_retries,
+                                           retry_transient_forever=self.retry_transient_forever,
                                            key_pool=False)
                         self._pool_clients[key["id"]] = client
                 return client._evaluate_once(state, questions, assets=assets)
@@ -257,7 +260,7 @@ class JevClient:
                 authorized=self.api_key is not None,
                 assets=assets,
             )
-        if self._sdk_client is not None and not assets:
+        if self._sdk_client is not None and not assets and not self.retry_transient_forever:
             return self._evaluate_sdk(state, questions, started)
         return self._evaluate_systemone_rest(
             state,
@@ -558,7 +561,8 @@ class JevClient:
         except (OSError, ValueError, ImportError) as exc:
             return JevResult(error=f"image input: {exc}", latency=time.time() - started)
         delay = 1.0
-        for attempt in range(self.max_retries + 1):
+        attempt = 0
+        while True:
             try:
                 response = requests.post(
                     f"{self.base_url}/v1/systemone",
@@ -566,7 +570,9 @@ class JevClient:
                     timeout=self.timeout,
                     **request_body,
                 )
-                if response.status_code in (429, 529) and attempt < self.max_retries:
+                if response.status_code in (429, 529) and (
+                    self.retry_transient_forever or attempt < self.max_retries
+                ):
                     retry_after = response.headers.get("retry-after")
                     time.sleep(
                         float(retry_after)
@@ -574,6 +580,7 @@ class JevClient:
                         else delay
                     )
                     delay = min(delay * 2, 30.0)
+                    attempt += 1
                     continue
                 response.raise_for_status()
                 body = response.json()
@@ -591,12 +598,14 @@ class JevClient:
                 message = f"{type(exc).__name__}: {exc}"
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 retryable = (
-                    (status is None or status in (408, 425, 429) or status >= 500)
+                    (isinstance(exc, requests.exceptions.RequestException)
+                     and (status is None or status in (408, 425, 429) or status >= 500))
                     and not (self.transport == "official" and status == 402)
                 )
-                if retryable and attempt < self.max_retries:
+                if retryable and (self.retry_transient_forever or attempt < self.max_retries):
                     time.sleep(delay)
                     delay = min(delay * 2, 30.0)
+                    attempt += 1
                     continue
                 return JevResult(
                     latency=time.time() - started,
@@ -607,12 +616,6 @@ class JevClient:
                     ),
                     http_status=status,
                 )
-        return JevResult(
-            latency=time.time() - started,
-            error="exhausted retries",
-            rate_limited=True,
-        )
-
     @staticmethod
     def _image_parts(payload: Dict[str, Any], assets: Mapping[str, Path]) -> list:
         """Build the documented multipart request; validate before uploading."""

@@ -19,6 +19,7 @@ import random
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 
@@ -149,6 +150,9 @@ def _fields(obj, names):
 
 
 def _sync_dir(path):
+    if os.name == 'nt':
+        # Windows has no directory fsync; files are flushed before atomic replace.
+        return
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(fd)
@@ -307,7 +311,8 @@ def _environment_identity(env):
                    "phase_mapping": getattr(env, "inter_phase_mapping", {})})
 
 
-def save_checkpoint(root, *, env, controller, loop, identity, append_paths, recorder=None):
+def save_checkpoint(root, *, env, controller, loop, identity, append_paths, recorder=None,
+                    visual_agent=None):
     """Commit an immutable SUMO+Python generation, then atomically publish it.
 
     ``identity`` must include resolved experiment parameters, input/code hashes,
@@ -322,24 +327,34 @@ def save_checkpoint(root, *, env, controller, loop, identity, append_paths, reco
         raise ValueError("SUMO/Python time mismatch")
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    generation = root / ("checkpoint-" + uuid.uuid4().hex)
-    generation.mkdir()
+    # Short atomic names keep nested Windows checkpoint files below MAX_PATH.
+    generation = Path(tempfile.mkdtemp(prefix="checkpoint-", dir=root))
     # Leave failed generations in place for diagnosis; they never become latest.
     sumo_path = generation / "sumo.xml"
     env.traci_conn.simulation.saveState(str(sumo_path))
     tree = ET.parse(sumo_path)
     if not any("rng" in element.tag.lower() for element in tree.iter()):
         raise ValueError("SUMO snapshot lacks RNG state; enable --save-state.rng at startup")
-    with sumo_path.open("rb") as stream:
+    with sumo_path.open("r+b") as stream:
         os.fsync(stream.fileno())
+    visual = None
+    append_paths = list(append_paths)
+    if visual_agent is not None:
+        visual = dict(prompt_version=visual_agent.prompt_version,
+                      cooperation=visual_agent.cooperation, unserved=visual_agent.unserved,
+                      last_step=visual_agent.last_step,
+                      previous_views={key: (step, [str(Path(p).resolve()) for p in paths])
+                                      for key, (step, paths) in visual_agent.previous_views.items()})
+        append_paths.extend(p for _, paths in visual['previous_views'].values() for p in paths)
     outputs = {}
     for filename in append_paths:
         path = Path(filename).resolve()
         # Caller has flushed writers; fsync before publishing byte boundaries.
-        with path.open("rb") as stream:
+        with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         outputs[str(path)] = {"size": path.stat().st_size, "sha256": sha256(path)}
     state = {
+        "visual_agent": visual,
         "env": _fields(env, ENV_FIELDS),
         "intersections": {i.inter_id: _fields(i, INTERSECTION_FIELDS) for i in env.list_intersection},
         "controller": _fields(controller, CONTROLLER_FIELDS),
@@ -364,7 +379,7 @@ def save_checkpoint(root, *, env, controller, loop, identity, append_paths, reco
     }
     _write_json(generation / "manifest.json", manifest)
     _sync_dir(generation)
-    pointer = root / (".latest-" + uuid.uuid4().hex + ".json")
+    pointer = root / (".latest-" + generation.name.removeprefix("checkpoint-") + ".json")
     _write_json(pointer, {"generation": generation.name,
                           "manifest_sha256": sha256(generation / "manifest.json")})
     os.replace(pointer, root / "latest.json")
@@ -414,7 +429,7 @@ class SimulationCheckpoint:
                     or sha256(path) != boundary["sha256"]):
                 raise ValueError(f"Output append boundary mismatch: {path}")
 
-    def restore_python(self, *, env, controller, recorder=None):
+    def restore_python(self, *, env, controller, recorder=None, visual_agent=None):
         """Restore after fresh reset(load_state_path=...), without advancing time."""
         self.validate_outputs()
         if controller_identity(controller) != self.manifest["controller"]:
@@ -435,6 +450,11 @@ class SimulationCheckpoint:
             raise ValueError("Rolling recorder configuration mismatch")
         if (controller.trajectory_relations is None) != (self.state["relations"] is None):
             raise ValueError("Co relation state mismatch")
+        visual = self.state.get('visual_agent')
+        if ((visual is None) != (visual_agent is None) or
+                (visual is not None and (visual['prompt_version'] != visual_agent.prompt_version or
+                                        visual['cooperation'] != visual_agent.cooperation))):
+            raise ValueError('Visual agent checkpoint policy mismatch')
         for key, value in self.state["env"].items():
             setattr(env, key, value)
         env._start_time = self.state["env_start_time"]
@@ -448,6 +468,11 @@ class SimulationCheckpoint:
         if recorder:
             vars(recorder).update(self.state["recorder"])
             env.add_step_listener(recorder)
+        if visual is not None:
+            visual_agent.unserved = visual['unserved']
+            visual_agent.last_step = visual['last_step']
+            visual_agent.previous_views = {key: (step, [Path(p) for p in paths])
+                                          for key, (step, paths) in visual['previous_views'].items()}
         # reset(load_state_path) established fresh subscriptions. Their flags and
         # connection-local handles must not be copied from the old process.
         random.setstate(self.state["random"])

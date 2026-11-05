@@ -105,6 +105,65 @@ def test_ssl_outage_retries_with_bounded_backoff(monkeypatch, image_path):
     assert sleeps == [1, 2, 4, 8, 16, 30, 30, 30]
 
 
+def test_visual_retry_policy_keeps_retrying_transient_network_errors(monkeypatch, image_path):
+    client = JevClient(transport="official", mock=True, api_key="test", max_retries=0,
+                       retry_transient_forever=True)
+    client.mock = False
+    calls, sleeps = [], []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        if len(calls) <= 4:
+            raise requests.exceptions.ConnectionError("temporary disconnect")
+        return SimpleNamespace(status_code=200, headers={}, raise_for_status=lambda: None,
+                               json=lambda: {"model": "jev-1.14.0", "answers": {}})
+
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr("jevlight.jev_client.time.sleep", sleeps.append)
+    result = client.evaluate({"image": "ref"}, {}, assets={"ref": image_path})
+    assert result.error is None
+    assert len(calls) == 5
+    assert sleeps == [1, 2, 4, 8]
+
+
+def test_visual_retry_policy_does_not_retry_payment_required(monkeypatch, image_path):
+    client = JevClient(transport="official", mock=True, api_key="test", max_retries=0,
+                       retry_transient_forever=True)
+    client.mock = False
+    response = requests.Response()
+    response.status_code = 402
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        return response
+
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr("jevlight.jev_client.time.sleep", lambda _: pytest.fail("402 must not retry"))
+    result = client.evaluate({"image": "ref"}, {}, assets={"ref": image_path})
+    assert result.http_status == 402
+    assert len(calls) == 1
+
+
+def test_visual_retry_policy_covers_second_stage_without_image_assets(monkeypatch):
+    client = JevClient(transport="official", mock=True, api_key="test", max_retries=0,
+                       retry_transient_forever=True)
+    client.mock = False
+    client._sdk_client = object()
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return SimpleNamespace(status_code=200, headers={}, raise_for_status=lambda: None,
+                               json=lambda: {"model": "jev-1.14.0", "answers": {"phase": phase_answer("NTST")}})
+
+    monkeypatch.setattr(requests, "post", post)
+    result = client.evaluate({"intersection_id": "i0"}, {"phase": {"type": "choice"}})
+    assert result.error is None
+    assert result.answers["phase"]["choice"] == "NTST"
+    assert calls[0][0].endswith("/v1/systemone")
+
+
 @pytest.mark.parametrize("size", [(256, 256), (255, 1024), (1569, 512)])
 def test_bad_image_dimensions_do_not_make_a_request(monkeypatch, tmp_path, size):
     path = tmp_path / "bad.png"

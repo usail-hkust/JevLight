@@ -50,6 +50,7 @@ def test_left_turn_keeps_centerline_lane_and_excludes_right_and_through(tmp_path
     assert through.getpixel((80, 400)) == (32, 32, 32)
     assert through.getpixel((120, 400)) == pixels.getpixel((120, 400))
     assert through.getpixel((170, 400)) == (32, 32, 32)
+    assert left.getpixel((5, 40)) == pixels.getpixel((5, 40))
 
 
 def test_all_static_jinan_signal_connections_define_right_through_left_in_lane_order():

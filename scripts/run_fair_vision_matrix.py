@@ -87,7 +87,8 @@ def build_plan(open_models, endpoints=None, smoke=False):
                 if any("key" in name.lower() for name in config):
                     raise ValueError("Credentials must come from the environment or private vault")
                 overrides = dict(image_decisions=True, image_agent="vlalight", image_renderer="vlalight",
-                                 visual_cooperation=True, fail_on_image_fallback=True)
+                                 visual_cooperation=True, fail_on_image_fallback=True,
+                                 retry_transient_forever=True)
                 if model == OFFICIAL:
                     if config["jev_transport"] != "official" or config["jev_base_url"] != "https://api.typesafe.ai":
                         raise ValueError("Official Jev must use the TypeSafe endpoint")
@@ -158,7 +159,7 @@ def validate_run(job, summary_path):
     expected = job["effective_config"]
     for key in (*SHARED, "seed", "dataset", "traffic_file", "jev_transport", "jev_model",
                 "image_decisions", "image_agent", "image_renderer", "visual_cooperation",
-                "fail_on_image_fallback"):
+                "fail_on_image_fallback", "retry_transient_forever"):
         if config.get(key) != expected[key]:
             raise ValueError(f"Runtime configuration drifted: {key}")
     if summary.get("final/duration") != expected["count"]:
@@ -197,6 +198,22 @@ def reusable(record):
         Path(p).is_file() and digest(p) == value for p, value in record["artifacts"].items())
 
 
+def resumable_attempt(output, job):
+    """Keep the original run ID and output paths when a committed snapshot exists."""
+    for attempt in sorted((output / 'attempts').glob(job['id'] + '_*'),
+                          key=lambda p: p.stat().st_mtime, reverse=True):
+        record = json.loads((attempt / 'record.json').read_text(encoding='utf-8'))
+        if record.get('plan_sha256') != digest(output / 'plan.json'):
+            continue
+        memo = record['effective_config']['memo']
+        checkpoints = list((ROOT / 'results/jev-api' / memo).glob('*/checkpoints/latest.json'))
+        if len(checkpoints) > 1:
+            raise ValueError('Ambiguous checkpoints for ' + job['id'])
+        if checkpoints:
+            return attempt, record, checkpoints[0].parent
+    return None
+
+
 def write_scores(output, jobs):
     groups = {}
     for job in jobs:
@@ -226,9 +243,13 @@ def main(argv=None):
     parser.add_argument("--smoke", action="store_true", help="30-second checks, isolated from formal results")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--resume", action="store_true", help="Skip only hash-verified completed jobs")
+    parser.add_argument("--checkpoint-every-steps", type=int, default=0,
+                        help="Save a resumable visual simulation every N control steps; 0 disables")
     parser.add_argument("--limit", type=int, help="Maximum newly executed simulations")
     parser.add_argument("--output", type=Path, default=ROOT / "results/fair_vision_matrix")
     args = parser.parse_args(argv)
+    if args.checkpoint_every_steps < 0:
+        parser.error('checkpoint interval must be nonnegative')
     if args.limit is not None and args.limit <= 0:
         parser.error("limit must be positive")
     with ExitStack() as resources:
@@ -285,18 +306,31 @@ def main(argv=None):
             for job in pending:
                 if source_hashes() != plan["source_hashes"] or not unchanged_inputs(job):
                     raise ValueError("Code, configuration or traffic data changed after planning")
-                attempt = output / "attempts" / (job["id"] + "_" + uuid.uuid4().hex)
-                attempt.mkdir(parents=True)
-                memo = "fair_" + attempt.name
+                resumed = resumable_attempt(output, job) if args.resume else None
+                if resumed:
+                    attempt, prior_record, checkpoint = resumed
+                    memo = prior_record['effective_config']['memo']
+                else:
+                    attempt = output / "attempts" / (job["id"] + "_" + uuid.uuid4().hex)
+                    attempt.mkdir(parents=True)
+                    memo = "fair_" + attempt.name
                 command = command_for(job, memo)
+                checkpoint_interval = args.checkpoint_every_steps or (1 if resumed else 0)
+                if checkpoint_interval:
+                    command.extend(['--checkpoint_every_steps', str(checkpoint_interval)])
+                if resumed:
+                    command.extend(['--resume_from', str(checkpoint), '--archive_resume_tails'])
                 record = dict(id=job["id"], model=job["model"], flow=job["flow"], seed=job["seed"],
                               status="running", plan_sha256=digest(path),
                               started_at=datetime.now(timezone.utc).isoformat(),
                               command=command, effective_config={**job["effective_config"], "memo": memo})
+                if resumed:
+                    record['started_at'] = prior_record['started_at']
+                    record['resume_count'] = prior_record.get('resume_count', 0) + 1
                 save_json(attempt / "record.json", record)
                 try:
-                    print("Running " + job["id"], flush=True)
-                    with (attempt / "runner.log").open("w", encoding="utf-8") as log:
+                    print(("Resuming " if resumed else "Running ") + job["id"], flush=True)
+                    with (attempt / "runner.log").open("a" if resumed else "w", encoding="utf-8") as log:
                         result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                     summaries = list((ROOT / "results/jev-api" / memo).glob("*/summary.json"))
                     if result.returncode or len(summaries) != 1:

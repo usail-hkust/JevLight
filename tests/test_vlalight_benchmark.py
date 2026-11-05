@@ -1,15 +1,53 @@
 from copy import deepcopy
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from jevlight.vlalight_images import compose_views, tls_camera_info, VLALightRenderer
+from jevlight.vlalight_images import (compose_views, tls_camera_info, VLALightRenderer,
+                                    configure_gltf_loader, lane_arrow_data, VIEW_LABELS)
 from scripts.benchmark_vlalight_jev import (
     OPEN_VISION_MODELS, build_cases, validate_summary, aggregate,
 )
 from scripts.fetch_vlalight_renderer import REVISION, blob_hash, selected
+
+
+def test_renderer_refuses_missing_gltf_before_loading_scene(monkeypatch, tmp_path):
+    import sys
+    source = tmp_path / 'VLALight'
+    renderer = VLALightRenderer(source, {"template": "Jinan", "road_net": "3_4"},
+                               'network.xml', tmp_path / 'frames')
+    renderer.scene_dir.mkdir(parents=True)
+    (tmp_path / 'renderer-manifest.json').write_text(
+        json.dumps({"repository": "usail-hkust/VLALight", "revision": REVISION}))
+    monkeypatch.setitem(sys.modules, 'gltf', None)
+    with pytest.raises(RuntimeError, match='Refusing the Assimp fallback'):
+        renderer.__enter__()
+    assert renderer.renderer is None
+
+
+def test_renderer_registers_gltf_even_when_another_loader_was_selected(monkeypatch):
+    import sys
+    from types import ModuleType
+    gltf = ModuleType('gltf')
+    gltf.__version__ = '1.3.0'
+    loader_module = ModuleType('gltf._loader')
+    loader_module.GltfLoader = object()
+    events = []
+    registry = SimpleNamespace(register_type=lambda loader: events.append(('loader', loader)))
+    core = ModuleType('panda3d.core')
+    core.LoaderFileTypeRegistry = SimpleNamespace(getGlobalPtr=lambda: registry)
+    core.BamCache = SimpleNamespace(getGlobalPtr=lambda: SimpleNamespace(
+        setCacheModels=lambda active: events.append(('disk_models', active))))
+    core.ModelPool = SimpleNamespace(releaseAllModels=lambda: events.append(('clear_pool',)))
+    monkeypatch.setitem(sys.modules, 'gltf', gltf)
+    monkeypatch.setitem(sys.modules, 'gltf._loader', loader_module)
+    monkeypatch.setitem(sys.modules, 'panda3d.core', core)
+    assert configure_gltf_loader() == {"asset_loader": "panda3d-gltf", "asset_loader_version": "1.3.0",
+                                       "asset_model_cache": "memory-only-v1"}
+    assert events == [('loader', loader_module.GltfLoader), ('disk_models', False), ('clear_pool',)]
 
 
 def test_camera_labels_follow_vehicle_motion_without_subscriptions():
@@ -36,6 +74,35 @@ def test_composite_preserves_crop_and_all_four_views():
     assert output.size == (768, 1440)
     for x, y, value in [(192, 360, 50), (576, 360, 100), (192, 1080, 150), (576, 1080, 200)]:
         assert output.getpixel((x, y)) == (value, value, value)
+
+
+def test_image_titles_use_vlalight_vehicle_travel_direction():
+    assert VIEW_LABELS == {'NORTHBOUND': 'NORTH', 'SOUTHBOUND': 'SOUTH',
+                           'EASTBOUND': 'EAST', 'WESTBOUND': 'WEST'}
+
+
+def test_direction_titles_fit_enlarged_strip_without_shifting_road():
+    views = [np.full((1080, 1920, 3), 120, dtype=np.uint8)] * 4
+    output = compose_views(views, list(VIEW_LABELS))
+    for x, y in [(0, 0), (384, 0), (0, 720), (384, 720)]:
+        tile = np.asarray(output.crop((x, y, x + 384, y + 720)))
+        text_y, text_x = np.where((tile[:, :, 0] > 180) & (tile[:, :, 1] > 180)
+                                  & (tile[:, :, 2] < 80))
+        assert text_y.max() - text_y.min() + 1 >= 20
+        assert text_y.max() < 42 and text_x.max() < 384
+        assert (tile[41] == 0).all()
+        assert (tile[42:] == 120).all()
+
+
+@pytest.mark.parametrize('dataset,intersections', [('Jinan/3_4', 12), ('Hangzhou/4_4', 16),
+                                                 ('NewYork/28_7', 196)])
+def test_static_arrows_match_all_controlled_lane_permissions(dataset, intersections):
+    data = Path(__file__).resolve().parents[1] / 'data' / dataset
+    arrows = lane_arrow_data(next(data.glob('roadnet*.net.xml')))
+    assert len(arrows) == intersections * 12
+    for shape, turn, width, index, count in arrows:
+        assert len(shape) >= 2 and width > 0 and count == 3
+        assert turn == ('right', 'straight', 'left')[index]
 
 
 def test_manifest_fetch_selects_renderer_without_training_or_accident_models():
