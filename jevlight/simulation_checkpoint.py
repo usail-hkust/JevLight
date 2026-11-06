@@ -24,6 +24,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from jevlight.sumo_runtime import require_sumo_128
 
 
 ENV_FIELDS = (
@@ -120,13 +121,11 @@ def file_identity(paths):
 def runtime_identity():
     """Probe the actual runtime before acquiring or modifying run outputs.
 
-    SUMOEnv launches ``sumo`` from PATH. Use that same executable here, and
+    SUMOEnv uses the shared runtime resolver. Use that same executable here, and
     preserve loader/probe errors instead of discovering them after archiving
     the previous attempt. This starts no simulation and uses no GPU.
     """
-    executable = shutil.which("sumo")
-    if executable is None:
-        raise FileNotFoundError("Checkpoint runtime preflight: 'sumo' not found in PATH")
+    executable = require_sumo_128()
     probe = subprocess.run([executable, "--version"], capture_output=True,
                            text=True, timeout=15)
     if probe.returncode:

@@ -6,9 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 import run_jevlight
+from jevlight.sumo_runtime import REQUIRED_VERSION
 from baselines.run_baseline import build_configs as baseline_configs, parse_args as baseline_args
 from jevlight.config import setup_dataset_config
 from scripts import run_fair_vision_matrix as matrix
+
+
+@pytest.fixture(autouse=True)
+def checked_runtime(monkeypatch):
+    monkeypatch.setattr(matrix, 'require_sumo_128', lambda: 'sumo-1.28.0')
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +47,7 @@ def test_all_84_conditions_share_the_upstream_baseline_environment(plan):
         assert len([j for j in plan["jobs"] if j["model"] == model]) == 21
     assert plan['visual_prompt_version'] == 'vlalight-two-stage-v2-co'
     assert plan['protocol'] == 'upstream-3600s-15s-visual-v3'
+    assert REQUIRED_VERSION == (1, 28, 0)
 
 
 def test_plan_mode_never_starts_a_process_or_sends_a_request(plan, monkeypatch, tmp_path):

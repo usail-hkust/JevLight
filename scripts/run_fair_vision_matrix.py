@@ -25,6 +25,7 @@ from scripts.benchmark_vlalight_jev import (build_cases, save_json, validate_sum
 from scripts.experiments.preparation_cases import FLOWS
 from jevlight.config import DATASETS
 from jevlight.simulation_checkpoint import OutputLease
+from jevlight.sumo_runtime import require_sumo_128
 from jevlight.visual_agent import VISUAL_PROMPT_VERSION
 
 OFFICIAL = "jev-vision"
@@ -110,6 +111,7 @@ def build_plan(open_models, endpoints=None, smoke=False):
                                      image_requests_per_seed=case["intersections"] * (config["count"] // 15)))
                 jobs.append(job)
     return dict(protocol="upstream-3600s-15s-visual-v3", stage="smoke" if smoke else "formal",
+                sumo_version="1.28.0",
                 visual_prompt_version=VISUAL_PROMPT_VERSION + "-co",
                 shared_settings={**SHARED, "count": 30 if smoke else 3600},
                 open_models=list(open_models), source_hashes=sources, jobs=jobs,
@@ -290,6 +292,9 @@ def main(argv=None):
                     pending.append(job)
             if args.limit:
                 pending = pending[:args.limit]
+            if pending:
+                selected_sumo = require_sumo_128()
+                print(f"Using SUMO 1.28.0: {selected_sumo}", flush=True)
             check_local_models(pending)
             checked = set()
             for job in pending:

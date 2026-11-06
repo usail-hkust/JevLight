@@ -83,13 +83,14 @@ def test_runtime_mismatch_preserves_uncommitted_tail(checkpoint, component):
 def test_runtime_probe_binds_actual_binary_and_preserves_loader_error(tmp_path, monkeypatch):
     from jevlight.simulation_checkpoint import runtime_identity
     binary = tmp_path / ('sumo.cmd' if os.name == 'nt' else 'sumo')
-    binary.write_text('@echo off\necho SUMO test build\n' if os.name == 'nt'
-                      else '#!/bin/sh\necho "SUMO test build"\n')
+    binary.write_text('@echo off\necho SUMO 1.28.0 test build\n' if os.name == 'nt'
+                      else '#!/bin/sh\necho "SUMO 1.28.0 test build"\n')
     binary.chmod(0o755)
     monkeypatch.setenv('PATH', str(tmp_path))
+    monkeypatch.setenv('SUMO_BINARY', str(binary))
     identity = runtime_identity()
     assert identity['sumo']['binary'] == {str(binary.resolve()): sha256(binary)}
-    assert identity['sumo']['version'] == 'SUMO test build'
+    assert identity['sumo']['version'] == 'SUMO 1.28.0 test build'
     assert identity['dependencies']['traci']['version']
     binary.write_text('@echo off\necho libXrender original loader failure >&2\nexit /b 127\n'
                       if os.name == 'nt' else
@@ -97,7 +98,7 @@ def test_runtime_probe_binds_actual_binary_and_preserves_loader_error(tmp_path, 
     with pytest.raises(RuntimeError, match='libXrender original loader failure'):
         runtime_identity()
     binary.unlink()
-    with pytest.raises(FileNotFoundError, match='not found in PATH'):
+    with pytest.raises(FileNotFoundError):
         runtime_identity()
 
 

@@ -15,6 +15,6 @@ CONSTRAINTS="$ROOT/.local/vision-core-constraints.txt"
 uv export --locked --no-dev --extra sumo --no-emit-project --no-hashes --output-file "$CONSTRAINTS" >/dev/null
 uv pip install --python "$RUNNER" -c "$CONSTRAINTS" -r scripts/vision_runner_requirements.txt
 uv pip check --python "$RUNNER"
-sumo --version
+"$RUNNER" -c 'from jevlight.sumo_runtime import require_sumo_128; print("Using SUMO 1.28.0:", require_sumo_128())'
 # Fetch and verify the pinned renderer, including any files missing after interruption.
 "$RUNNER" scripts/fetch_vlalight_renderer.py

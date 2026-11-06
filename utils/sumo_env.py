@@ -16,6 +16,7 @@ from copy import deepcopy
 
 import traci
 import sumolib
+from jevlight.sumo_runtime import require_sumo_128
 
 def _seg_wrap(_name):  # no-op placeholder for the removed profiling hook
         def deco(fn):
@@ -2072,7 +2073,7 @@ class SUMOEnv:
             f.write(sumocfg_content)
         
         # 3. Prepare and Launch SUMO
-        sumo_binary = "sumo"
+        sumo_binary = require_sumo_128()
         
         if seed is None:
             configured_seed = self.dic_traffic_env_conf.get("SEED")

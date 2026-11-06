@@ -85,7 +85,8 @@ def test_clean_setup_installs_runner_and_fetches_assets_without_models(tmp_path)
     assert " -c " in lines[3] and "vision-core-constraints.txt" in lines[3]
     assert lines[3].endswith("-r scripts/vision_runner_requirements.txt")
     assert lines[4].startswith("uv pip check --python ")
-    assert lines[5:] == ["sumo --version", "runner scripts/fetch_vlalight_renderer.py"]
+    assert lines[5].startswith("runner -c from jevlight.sumo_runtime import require_sumo_128;")
+    assert lines[6] == "runner scripts/fetch_vlalight_renderer.py"
 
 
 def test_renderer_requirements_do_not_override_the_core_project_dependencies():
