@@ -223,8 +223,8 @@
   .bench-context { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
   #benchmarks :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
   .bench-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; font-variant-numeric: tabular-nums; }
-  .bench-table th { text-align: left; width: 24%; color: var(--muted); padding: 0; border-bottom: 1px solid var(--border-strong); background: rgba(255,255,255,.025); }
-  .bench-table th:first-child { width: 36%; }
+  .bench-table th { text-align: left; width: 18%; color: var(--muted); padding: 0; border-bottom: 1px solid var(--border-strong); background: rgba(255,255,255,.025); }
+  .bench-table th:first-child { width: 30%; }
   .bench-table th:last-child { width: 16%; }
   .bench-table th button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 17px 20px; border: 0; background: none; color: inherit; font: 600 12px var(--sans); cursor: pointer; text-align: left; }
   .bench-table th button:hover { color: var(--text); background: rgba(255,255,255,.035); }
@@ -237,6 +237,7 @@
   .bench-model { font-size: 14px; font-weight: 600; }
   .bench-number { font: 500 14px var(--mono); white-space: nowrap; }
   .bench-number small { font-size: 11px; color: var(--muted); }
+  .bench-missing { color: var(--faint); font: 500 14px var(--mono); }
   .bench-delta { font: 500 13px var(--mono); white-space: nowrap; }
   .bench-delta.improved { color: var(--green); }
   .bench-delta.increased { color: var(--amber); }
@@ -581,7 +582,7 @@
   <div class="sec-head reveal">
     <div class="sec-tag">Benchmarks · SUMO</div>
     <h2 id="benchmark-title">Traffic control performance</h2>
-    <p class="sec-desc">JevLight and CoJevLight across Jinan, Hangzhou and New York.</p>
+    <p class="sec-desc">JevLight, CoJevLight and the rendered-camera VLALight variant across Jinan, Hangzhou and New York.</p>
   </div>
   <div class="bench-toolbar">
     <label for="bench-flow">Traffic flow<select id="bench-flow" disabled><option>Loading…</option></select></label>
@@ -589,16 +590,17 @@
   </div>
   <p class="bench-context" id="bench-context" role="status" aria-live="polite">Loading results…</p>
   <table class="bench-table" id="bench-table">
-    <caption class="sr-only" id="bench-caption">JevLight and CoJevLight comparison</caption>
+    <caption class="sr-only" id="bench-caption">JevLight, CoJevLight and VLALight comparison</caption>
     <thead><tr>
       <th scope="col"><button type="button" data-sort="model">Model<span class="sort-arrow" aria-hidden="true">↕</span></button></th>
       <th scope="col"><button type="button" data-sort="jevlight">JevLight<span class="sort-arrow" aria-hidden="true">↕</span></button></th>
       <th scope="col" aria-sort="ascending"><button type="button" data-sort="cojevlight">CoJevLight<span class="sort-arrow" aria-hidden="true">↑</span></button></th>
+      <th scope="col"><button type="button" data-sort="vlalight" title="Rendered-camera visual cooperation">VLALight<span class="sort-arrow" aria-hidden="true">↕</span></button></th>
       <th scope="col"><button type="button" data-sort="delta" title="Percentage change from JevLight; negative values are better">Δ Co<span class="sort-arrow" aria-hidden="true">↕</span></button></th>
     </tr></thead>
-    <tbody><tr><td colspan="4" class="bench-status">Loading results…</td></tr></tbody>
+    <tbody><tr><td colspan="5" class="bench-status">Loading results…</td></tr></tbody>
   </table>
-  <p class="bench-footnote">Mean ± standard deviation over three seeds · 3,600 s simulation · Lower is better. Δ Co is relative to JevLight.</p>
+  <p class="bench-footnote">Mean ± standard deviation over three seeds · 3,600 s simulation · Lower is better. Δ Co is relative to JevLight. VLALight rows use rendered camera views and visual cooperation; text-only models have no VLALight value, and visual agents have no text-only value.</p>
   <div class="bench-reference-title">Baseline</div>
   <div class="bench-references" id="bench-references"></div>
   <p class="bench-footnote" id="bench-metric-note"></p>
@@ -619,12 +621,13 @@
     <div class="ix-panel-head">
       <div>
         <div class="ix-panel-title">Composite score</div>
-        <div class="ix-panel-sub">Mean of the {cells} per-scene, per-metric scores ({scenes} flows × ATT / AWT / AQL). The dashed line is the rule-based baseline, scored on the same scale. Traditional includes the RL and rule-based controllers run on the same protocol.</div>
+        <div class="ix-panel-sub">Mean of the {cells} per-scene, per-metric scores ({scenes} flows × ATT / AWT / AQL). The dashed line is Max Pressure, scored on the same scale. VLALight is the rendered-camera visual-agent variant; Traditional includes the RL and rule-based controllers, each with its own colour.</div>
       </div>
       <div class="ix-toggle" role="group" aria-label="Ranking mode" data-scope="bar">
         <button type="button" data-mode="all" aria-pressed="false">All</button>
         <button type="button" data-mode="cojevlight" aria-pressed="true">CoJevLight</button>
         <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+        <button type="button" data-mode="vlalight" aria-pressed="false">VLALight</button>
         <button type="button" data-mode="baseline" aria-pressed="false">Traditional</button>
       </div>
     </div>
@@ -641,6 +644,7 @@
         <button type="button" data-mode="all" aria-pressed="true">All</button>
         <button type="button" data-mode="cojevlight" aria-pressed="false">CoJevLight</button>
         <button type="button" data-mode="jevlight" aria-pressed="false">JevLight</button>
+        <button type="button" data-mode="vlalight" aria-pressed="false">VLALight</button>
         <button type="button" data-mode="baseline" aria-pressed="false">Traditional</button>
       </div>
     </div>
@@ -651,11 +655,12 @@
   <div class="ix-method reveal" id="ix-method">
     <div class="ix-method-block">
       <div class="ix-method-title">How the score is computed</div>
-      <p>Each of the {cells} cells — one scene, one metric — is normalised on its own log scale over every published
-      configuration: <code>100 · (ln hi − ln x) / (ln hi − ln lo)</code>, where <code>lo</code> is the best and
-      <code>hi</code> the worst value observed in that cell. Lower is better for ATT, AWT and AQL, so the best
-      observation scores 100 and the worst scores 0. A configuration's index is the unweighted mean of its
-      {cells} cells, which weights every scene and every metric equally.</p>
+      <p>Each of the {cells} cells — one scene, one metric — is normalised on its own log scale over the published
+      text decision-model configurations: <code>100 · (ln hi − ln x) / (ln hi − ln lo)</code>, where <code>lo</code> is
+      the best and <code>hi</code> the worst value observed in that cell. Lower is better for ATT, AWT and AQL, so the
+      best observation scores 100 and the worst scores 0. Traditional controllers and visual agents are scored against
+      those same bounds. A configuration's index is the unweighted mean of its {cells} cells, which weights every scene
+      and every metric equally.</p>
       <p>The order is not an artefact of those choices. Trimming the worst decile from the bounds, swapping
       log for linear scaling, or reweighting the metrics to 50 / 30 / 20 keeps the same top ten
       (Spearman ρ ≥ 0.985 against the published order). It only starts to bend when all weight is pushed onto a
@@ -671,9 +676,10 @@
       GPU-seconds; each scene takes the median over its three seeds, and the seven scenes are then averaged,
       matching the equal-scene weighting of the score. Hosted APIs are ranked but kept off the plane, because
       their hardware is not ours to measure.</p>
-      <p class="ix-method-data">Data: {configurations} configurations per mode over {scenes} scenes, three seeds each,
-      for {runs} runs of serving telemetry. Sources: <code>assets/benchmark.json</code> and
-      <code>assets/telemetry.json</code>; the page reads the generated <code>assets/composite.js</code>.</p>
+      <p class="ix-method-data">Data: {configurations} decision-model configurations over {scenes} scenes, three seeds
+      each, for {runs} runs of serving telemetry. Sources: <code>assets/benchmark.json</code>,
+      <code>assets/visual.json</code> and <code>assets/telemetry.json</code>; the page reads the generated
+      <code>assets/composite.js</code>.</p>
     </div>
   </div>
   <noscript><p class="bench-footnote">Enable JavaScript to view the composite index.</p></noscript>

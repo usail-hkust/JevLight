@@ -328,7 +328,7 @@ Options: `--viz_host`/`--viz_port` (next free port is picked automatically), `--
 ## Usage
 
 ```bash
-# 1) MaxPressure baseline, no decision model at all (dry run):
+# 1) Local Max Pressure dry run, no decision model at all:
 uv run python run_jevlight.py --dry_run --count 3600
 
 # 2) Pipeline smoke test, no API key (deterministic mock decisions):
@@ -351,7 +351,7 @@ uv run python run_jevlight.py --jev_transport local --count 900
 uv run python run_jevlight.py --agent jevlight --count 3600 --rolling_evaluation
 ```
 
-`--dry_run` swaps the controller for a classic **MaxPressure** agent: each intersection activates the phase whose lanes hold the most vehicles (queued + approaching — the same pressure the mock Jev scores), entirely local, zero Jev requests, no key or transport needed. Traces record the per-phase pressures, and `summary.json` carries `"dry_run": true` with zero Jev usage — a standalone baseline for a separately authorized later task. Model campaign queues neither run nor depend on MaxPressure. The `baselines/` package ships a second, formula-different MaxPressure variant (upstream-minus-downstream lane pressure) — see the [Baselines](#baselines) section for the distinction.
+`--dry_run` swaps the controller for a local **MaxPressure** agent: each intersection activates the phase whose lanes hold the most vehicles (queued + approaching — the same pressure the mock Jev scores), entirely local, zero Jev requests, no key or transport needed. Traces record the per-phase pressures, and `summary.json` carries `"dry_run": true` with zero Jev usage — a standalone smoke-test baseline. Model campaign queues neither run nor depend on it. The [Baselines](#baselines) package publishes the **Max Pressure** controller used by the benchmark page; it scores a movement by its queued vehicles minus the queue on the outgoing road it feeds, so it is not the same formula as `--dry_run`.
 
 Each run writes `results/<model>/<memo>/<run_id>/` (CLI-only runs default to `results/jev/JevLight/<run_id>/`):
 
@@ -362,7 +362,7 @@ Each run writes `results/<model>/<memo>/<run_id>/` (CLI-only runs default to `re
 
 ## Baselines
 
-The `baselines/` package runs classic baseline methods on JevLight's evaluation stack: **LLMLight** and **CoLLMLight** (LLM, inference-time control), **CoLight**, **PressLight**, **MPLight**, **AttendLight**, **AdvancedDQN** (TensorFlow RL), **CityLight** (PyTorch MAPPO), **MaxPressure** (strict lane-pressure formula; not the `run_jevlight.py --dry_run` MaxPressure the benchmark uses as its reference line, and published separately as "MaxPressure (strict)"), **Webster**, and **FixedTime**. They run through their own entry point, `python -m baselines.run_baseline`, which reuses the same `SUMOEnv`, observation collector, and metric computation unchanged and mirrors `run_jevlight.py`'s control loop (a drift-guard test pins the mirrored configuration to it). Results land in `results/<baseline>/<memo>/<run_id>/` with the same `summary.json` / `jev_decisions.jsonl` layout, so baseline numbers are directly comparable with Jev/CoJev runs; `run_jevlight.py` itself is not modified.
+The `baselines/` package runs classic baseline methods on JevLight's evaluation stack: **LLMLight** and **CoLLMLight** (LLM, inference-time control), **CoLight**, **PressLight**, **MPLight**, **AttendLight**, **AdvancedDQN** (TensorFlow RL), **CityLight** (PyTorch MAPPO), **Max Pressure** (the pressure formula the LLM traffic-control literature uses: in-queue vehicles minus the whole outgoing-road queue, with boundary movements competing; published under the plain name "Max Pressure"), **Webster**, and **FixedTime**. They run through their own entry point, `python -m baselines.run_baseline`, which reuses the same `SUMOEnv`, observation collector, and metric computation unchanged and mirrors `run_jevlight.py`'s control loop (a drift-guard test pins the mirrored configuration to it). Results land in `results/<baseline>/<memo>/<run_id>/` with the same `summary.json` / `jev_decisions.jsonl` layout, so baseline numbers are directly comparable with Jev/CoJev runs; `run_jevlight.py` itself is not modified.
 
 ```bash
 # Heuristic baselines (SUMO only, no decision model, no extra dependencies):
@@ -381,7 +381,7 @@ uv run --extra sumo --extra baselines-rl python -m baselines.run_baseline \
     --baseline colight --rl_checkpoint model/Colight/<traffic>_<ts> --count 3600
 ```
 
-Shared arguments mirror `run_jevlight.py` (`--dataset`, `--traffic_file`, `--duration`, `--count`, `--seed`, `--eightphase`, `--rolling_evaluation`, …); experiment configs live in `baselines/config/<baseline>/<experiment>.json`. The runner supports neither `--visualize` nor checkpoint resume. Dependencies: the heuristic baselines need nothing beyond the core project, the generic LLM path needs the `baselines-llm` extra, the five TensorFlow RL models need `baselines-rl`, and CityLight needs `baselines-rl-torch` (an umbrella `baselines` extra installs all three). See [baselines/README.md](baselines/README.md) for the LLM endpoint configuration, RL checkpoint layout, and implementation notes — including the MaxPressure naming note: `run_jevlight.py --dry_run` groups under `results/maxpressure/` too, but scores own-lane queued + approaching vehicles, while the baseline scores upstream minus downstream queues.
+Shared arguments mirror `run_jevlight.py` (`--dataset`, `--traffic_file`, `--duration`, `--count`, `--seed`, `--eightphase`, `--rolling_evaluation`, …); experiment configs live in `baselines/config/<baseline>/<experiment>.json`. The runner supports neither `--visualize` nor checkpoint resume. Dependencies: the heuristic baselines need nothing beyond the core project, the generic LLM path needs the `baselines-llm` extra, the five TensorFlow RL models need `baselines-rl`, and CityLight needs `baselines-rl-torch` (an umbrella `baselines` extra installs all three). See [baselines/README.md](baselines/README.md) for the LLM endpoint configuration, RL checkpoint layout, and implementation notes — including the Max Pressure naming note: the published controller scores a movement by its queued vehicles minus the queue on the outgoing road it feeds, while `run_jevlight.py --dry_run` remains a separate local controller that scores own-lane queued + approaching vehicles and is not the benchmark's Max Pressure row.
 
 ## Datasets
 
@@ -394,23 +394,29 @@ Four SUMO scenarios ship with the repo (selected with `--dataset`, traffic file 
 | `newyork` | 28×7 | 196 | real_double, real_triple |
 | `newyork_16x3` | 16×3 | 48 | real |
 
-MZW and Manhattan are not included; copy them from the upstream project's `data/` and register them in `jevlight/config.py` if needed. Published SUMO benchmark results are available on the project homepage, with data in `assets/benchmark.json`. That file is generated, not hand-edited: `python scripts/benchmark/build_benchmark.py --write` rebuilds it from the formal experiment records (mean and sample standard deviation across the three seeds, per traffic flow and mode).
+MZW and Manhattan are not included; copy them from the upstream project's `data/` and register them in `jevlight/config.py` if needed. Published SUMO benchmark results are available on the project homepage, with data in `assets/benchmark.json`, its traditional-baseline input `assets/baselines.json`, and the visual-agent input `assets/visual.json`. `benchmark.json` is generated, not hand-edited: `python scripts/benchmark/build_benchmark.py --write` rebuilds the text records (mean and sample standard deviation across the three seeds, per traffic flow and mode) and merges the two inputs.
 
 The homepage also publishes a composite index over those results, plus a score-vs-compute plane. Both are derived, never hand-edited:
 
 ```bash
-# 1) Serving telemetry, run where the experiment records live:
+# 1) Baseline and visual exports (small JSON dumps of the campaign records):
+python scripts/benchmark/export_baselines.py --runs baselines_runs.json --write
+python scripts/benchmark/export_visual.py --runs visual_runs.json --write
+python scripts/benchmark/build_benchmark.py --write
+
+# 2) Serving telemetry, run where the experiment records live:
 python scripts/benchmark/collect_telemetry.py \
     --records results/experiments/records \
     --legacy-csv results/decision_models/2a800/experiment_records.csv \
     --benchmark assets/benchmark.json --results-root results \
     --out assets/telemetry.json
+python scripts/benchmark/merge_visual_telemetry.py --runs visual_runs.json --write
 
-# 2) Composite index + cost plane (writes assets/composite.json and .js):
+# 3) Composite index + cost plane (writes assets/composite.json and .js):
 python scripts/benchmark/build_composite.py
 ```
 
-`collect_telemetry.py` reads only aggregates out of each run's `jev_decisions.jsonl` (decision count, tokens, and the per-step maximum request latency), and can recover the runs behind a published aggregate by matching its metric fingerprint when a run directory has no record file. `build_composite.py` normalises every (scene, metric) cell with a log min-max across the whole published pool, averages the 21 cells into one score, and derives cost as serving time × GPUs held. Sources live in `assets/benchmark.json` and `assets/telemetry.json`; the page reads the generated files through `assets/composite.js`.
+`collect_telemetry.py` reads only aggregates out of each run's `jev_decisions.jsonl` (decision count, tokens, and the per-step maximum request latency), and can recover the runs behind a published aggregate by matching its metric fingerprint when a run directory has no record file. `merge_visual_telemetry.py` adds the visual conditions from their per-seed summary export. `build_composite.py` normalises every (scene, metric) cell with a log min-max across the published text decision-model pool, averages the 21 cells into one score, and derives cost as serving time × GPUs held. Traditional controllers and visual agents are scored against those bounds without moving them. Sources live in `assets/benchmark.json`, `assets/visual.json` and `assets/telemetry.json`; the page reads the generated files through `assets/composite.js`.
 
 ## VLALight cameras + direct Jev decisions
 

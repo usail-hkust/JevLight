@@ -38,7 +38,8 @@ OUT = ROOT / 'assets/composite.json'
 
 METRICS = ('att', 'awt', 'aql')
 METRIC_LABELS = {'att': 'Travel time', 'awt': 'Waiting time', 'aql': 'Queue length'}
-MODES = ('cojevlight', 'jevlight')
+MODES = ('cojevlight', 'jevlight', 'vlalight')
+MODE_LABELS = {'cojevlight': 'CoJevLight', 'jevlight': 'JevLight', 'vlalight': 'VLALight'}
 
 # Display names the id alone cannot produce faithfully.
 NAME_OVERRIDES = {
@@ -47,7 +48,9 @@ NAME_OVERRIDES = {
     'open-jev-2b': 'Open-JEV 2B', 'open-jev-9b': 'Open-JEV 9B',
     'open-jev-27b': 'Open-JEV 27B', 'bespoke-nimble-9b': 'Bespoke-Nimble 9B',
     'laya-multilingual': 'Laya Multilingual', 'agent-jev': 'Agent-JEV',
-    'maxpressure': 'MaxPressure', 'maxpressure-strict': 'MaxPressure (strict)',
+    'maxpressure': 'Max Pressure',
+    'amos-1-large': 'Amos 1 Large', 'd3-turbo': 'D3-Turbo',
+    'vlalight-4b': 'VLALight-4B', 'wemm-jev': 'WeMM-JEV',
     'decider-4b': 'Decider 4B',
     'advanceddqn': 'AdvancedDQN', 'attendlight': 'AttendLight',
     'citylight': 'CityLight', 'colight': 'CoLight', 'fixedtime': 'FixedTime',
@@ -74,12 +77,33 @@ FAMILIES = (
     ('von', 'Von', '#81c784'),
     ('gliner', 'GLiNER', '#4fc3f7'),
     ('jev-api', 'Jev API', '#e8eef5'),
-    ('maxpressure', 'MaxPressure', '#8a99a8'),
+    ('maxpressure', 'Max Pressure', '#8a99a8'),
+    ('wemm-jev', 'WeMM-JEV', '#c6f432'),
+    ('d3-turbo', 'D3-Turbo', '#26c6da'),
+    ('amos-1-large', 'Amos 1 Large', '#ff8f00'),
+    ('vlalight-4b', 'VLALight-4B', '#ff4d8d'),
 )
+
+# Traditional controllers are one class of method, but each gets its own hue
+# so the bars stay distinguishable when they share the chart with the model
+# families.
+TRADITIONAL_COLORS = {
+    'advanceddqn': '#84cc16',
+    'attendlight': '#f9a8d4',
+    'citylight': '#e9c46a',
+    'colight': '#f4a261',
+    'fixedtime': '#94a3b8',
+    'maxpressure': '#a78bfa',
+    'mplight': '#2a9d8f',
+    'presslight': '#38bdf8',
+    'webster': '#b45309',
+}
 
 
 def family_of(model_id: str) -> str:
     if model_id in ('maxpressure', 'jev-api'):
+        return model_id
+    if model_id in ('wemm-jev', 'd3-turbo', 'amos-1-large', 'vlalight-4b'):
         return model_id
     if model_id.startswith('pplx'):
         return 'pplx'
@@ -156,15 +180,15 @@ def main() -> int:
     for entry in bench['aggregates']:
         groups.setdefault((entry['model'], entry['mode']), {})[entry['flow']] = entry['metrics']
 
-    # Column bounds over the decision-model configurations. Traditional
-    # baselines are scored against these bounds rather than setting them: they
-    # are a different class of method, and letting their numbers move the scale
-    # would silently change every published score.
+    # Column bounds over the text decision-model configurations. Traditional
+    # baselines and visual agents are scored against these bounds rather than
+    # setting them: they are different classes of method, and letting their
+    # numbers move the scale would silently change every published score.
     columns = {}
     for flow in flows:
         for metric in METRICS:
             values = [g[flow][metric]['mean'] for (model, mode), g in groups.items()
-                      if flow in g and mode != 'baseline']
+                      if flow in g and mode not in ('baseline', 'vlalight')]
             columns[(flow, metric)] = (min(values), max(values))
 
     # Serving telemetry grouped per configuration and per flow.
@@ -248,7 +272,7 @@ def main() -> int:
     for config in configs:
         config['pareto'] = config['id'] in frontier
 
-    # MaxPressure: the reference line, no model compute.
+    # Max Pressure: the reference line, no model compute.
     baseline = None
     for (model, mode), by_flow in groups.items():
         if mode != 'maxpressure':
@@ -261,7 +285,7 @@ def main() -> int:
                 score = cell_score(raw, *columns[(flow, metric)])
                 cells[flow][metric] = dict(raw=round(raw, 3), score=round(score, 2))
                 scores.append(score)
-        baseline = dict(id=model, name=published.get(model, 'MaxPressure'),
+        baseline = dict(id=model, name=published.get(model, 'Max Pressure'),
                         score=round(sum(scores) / len(scores), 2), cells=cells)
 
     # Traditional baselines: scored on the same per-(flow, metric) columns as
@@ -296,9 +320,12 @@ def main() -> int:
         wall_by_flow = {flow: (round(statistics.median(values), 1) if values else None)
                         for flow, values in by_flow.items()}
         measured = [value for value in wall_by_flow.values() if value is not None]
+        name = NAME_OVERRIDES.get(model) or display_name(model, published)
         traditional.append(dict(
-            id=model, name=NAME_OVERRIDES.get(model) or display_name(model, published),
-            mode='baseline', score=round(sum(scores) / len(scores), 2), cells=cells,
+            id=model, name=name, mode='baseline',
+            family='traditional:' + model, family_label=name,
+            color=TRADITIONAL_COLORS.get(model, '#8a99a8'),
+            score=round(sum(scores) / len(scores), 2), cells=cells,
             cost=dict(gpu_seconds=round(statistics.mean(measured), 1) if measured else None,
                       wall_seconds=round(statistics.median(walls), 1) if walls else None,
                       gpus=1, hosted=False, basis='wall clock x 1 GPU',
@@ -332,8 +359,9 @@ def main() -> int:
             procedure='SUMO, 3,600 s episode, 240 control steps, 3 seeds per condition',
         ),
         method=dict(
-            normalisation='Per (flow, metric) log min-max over every published configuration. '
-                          'Best observed = 100, worst observed = 0.',
+            normalisation='Per (flow, metric) log min-max over the published text decision-model '
+                          'configurations. Best observed = 100, worst observed = 0. '
+                          'Traditional and visual configurations are scored against those bounds.',
             aggregation='Unweighted mean of the 21 cell scores (7 flows x 3 metrics).',
             cost='Per flow: median over the three seeds of serving time x GPUs held; '
                  'then averaged over the seven flows.',
@@ -343,7 +371,7 @@ def main() -> int:
         flows=[dict(id=f, name=flow_names[f], intersections=flow_sizes[f]) for f in flows],
         columns=[dict(flow=f, metric=m, min=columns[(f, m)][0], max=columns[(f, m)][1])
                  for f in flows for m in METRICS],
-        modes=[dict(id=m, label='CoJevLight' if m == 'cojevlight' else 'JevLight') for m in MODES],
+        modes=[dict(id=m, label=MODE_LABELS[m]) for m in MODES],
         configs=configs,
         pareto=frontier,
         baseline=baseline,

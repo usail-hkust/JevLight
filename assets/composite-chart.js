@@ -25,6 +25,7 @@
     v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const int = v => (v == null ? '—' : v.toLocaleString('en-US'));
   const modeLabel = id => id === 'cojevlight' ? 'CoJevLight'
+    : id === 'vlalight' ? 'VLALight'
     : id === 'baseline' ? 'Traditional' : 'JevLight';
 
   function el(tag, attrs = {}, text) {
@@ -112,7 +113,9 @@
     if (!barHost) return;
     barHost.innerHTML = '';
     const traditional = (data.traditional || []).map(b => ({
-      ...b, color: '#8a99a8', mode: 'baseline', family_label: 'Traditional'}));
+      ...b, color: b.color || '#8a99a8', mode: 'baseline',
+      family: b.family || `traditional:${b.id}`,
+      family_label: b.family_label || b.name || 'Traditional'}));
     let configs;
     if (state.barMode === 'baseline') {
       configs = traditional;
@@ -151,7 +154,8 @@
     // traditional controllers share the axis, so label each row with its class.
     const barLabel = config => state.barMode !== 'all' ? config.name
       : config.mode === 'baseline' ? `${config.name} (Trad.)`
-      : config.mode === 'cojevlight' ? `${config.name} (Co)` : config.name;
+      : config.mode === 'cojevlight' ? `${config.name} (Co)`
+      : config.mode === 'vlalight' ? `${config.name} (VLA)` : config.name;
 
     const barH = 13;
     configs.forEach((config, index) => {
@@ -192,7 +196,7 @@
       }));
       svg.appendChild(el('text', {
         x: bx, y: height - BAR.bottom + 44, class: 'ix-baseline-label', 'text-anchor': 'middle'
-      }, `MaxPressure baseline ${fmt(data.baseline.score)}`));
+      }, `Max Pressure baseline ${fmt(data.baseline.score)}`));
     }
     barHost.appendChild(svg);
   }
@@ -211,13 +215,15 @@
   }
 
   function ticksFor(lo, hi) {
-    const candidates = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    const candidates = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
     return candidates.filter(v => v >= lo && v <= hi);
   }
 
   function scatterPoints() {
     const traditional = (data.traditional || []).map(b => ({
-      ...b, color: '#8a99a8', mode: 'baseline', family_label: 'Traditional'}));
+      ...b, color: b.color || '#8a99a8', mode: 'baseline',
+      family: b.family || `traditional:${b.id}`,
+      family_label: b.family_label || b.name || 'Traditional'}));
     const pool = state.scatterMode === 'all'
       ? [...data.configs, ...traditional]
       : state.scatterMode === 'baseline'
@@ -229,8 +235,9 @@
   function pointLabel(config) {
     const both = state.scatterMode === 'all' || state.scatterMode === 'baseline';
     if (config.mode === 'baseline') return `${config.name} (Trad.)`;
-    return both && config.mode === 'cojevlight'
-      ? `${config.name} (Co)` : config.name;
+    if (both && config.mode === 'cojevlight') return `${config.name} (Co)`;
+    if (both && config.mode === 'vlalight') return `${config.name} (VLA)`;
+    return config.name;
   }
 
   function renderScatter() {
@@ -304,10 +311,11 @@
       const isFront = frontIds.has(point.id);
       const group = el('g', { class: 'ix-point-group', 'data-config': point.id, tabindex: '0' });
       if (isFront) group.appendChild(el('circle', { cx: px, cy: py, r: 12, class: 'ix-point-halo' }));
-      if (both && point.mode === 'cojevlight') {
+      if (both && (point.mode === 'cojevlight' || point.mode === 'vlalight')) {
         group.appendChild(el('circle', {
           cx: px, cy: py, r: (isFront ? 7.2 : 5.2) + 3.2,
-          fill: 'none', stroke: point.color, 'stroke-width': 1.2, opacity: 0.55
+          fill: 'none', stroke: point.color, 'stroke-width': 1.2,
+          opacity: 0.55, 'stroke-dasharray': point.mode === 'vlalight' ? '2 2' : null
         }));
       }
       group.appendChild(el('circle', {
@@ -406,8 +414,10 @@
 
     const notes = [];
     if (both) {
-      notes.push('All configurations are shown: a plain name is JevLight, “(Co)” is CoJevLight — the same model '
-        + 'under the two observation scopes, drawn with a second ring — and “(Trad.)” is a traditional controller.');
+      notes.push('All configurations are shown: a plain name is JevLight, “(Co)” is CoJevLight — the same '
+        + 'model under the two observation scopes, drawn with a second ring — “(VLA)” is the visual-agent '
+        + 'VLALight mode, ringed with a dashed outline, and “(Trad.)” is a traditional controller. '
+        + 'Traditional controllers each carry their own colour.');
     }
     const hosted = data.configs.filter(c => c.hosted);
     if (hosted.length) {
@@ -439,7 +449,7 @@
     const values = {
       cells: String(data.flows.length * data.metrics.length),
       scenes: String(data.flows.length),
-      configurations: String(data.configs.length / data.modes.length),
+      configurations: String(data.configs.length),
       runs: int(data.source.telemetry_runs)
     };
     // Edit text nodes in place: rewriting section.innerHTML would drop the

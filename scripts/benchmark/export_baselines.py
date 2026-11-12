@@ -12,12 +12,12 @@ single mode, recorded as ``baseline``, so they never mix into the
 JevLight/CoJevLight comparison table while still being scored on the same
 per-(flow, metric) columns.
 
-Two controllers are both called MaxPressure and must not share an id. The
-campaign's ``--baseline maxpressure`` is ``baselines/maxpressure.py``, the
-strict upstream-minus-downstream lane pressure, published as
-``maxpressure-strict``. ``maxpressure`` stays the benchmark's own controller
-(``run_jevlight.py --dry_run``, queue plus approaching vehicles), the dashed
-reference line on the page; its runs come from a separate export.
+The published MaxPressure is the pressure formula the LLM traffic-control
+literature scores (in-queue minus the whole outgoing-road queue, with boundary
+movements competing). It is published under the plain id ``maxpressure`` and
+the name "Max Pressure"; the strict upstream-minus-downstream variant and the
+internal dry-run controller are not published. The same runs are also copied
+into ``assets/benchmark.json`` as the dashed reference line.
 
 Usage::
 
@@ -44,8 +44,9 @@ NAME_OVERRIDES = {
     'citylight': 'CityLight',
     'colight': 'CoLight',
     'fixedtime': 'FixedTime',
-    'maxpressure': 'MaxPressure',
-    'maxpressure-strict': 'MaxPressure (strict)',
+    # The published controller is the literature pressure formula under the
+    # ordinary name; the older strict variant is no longer published.
+    'maxpressure': 'Max Pressure',
     'mplight': 'MPLight',
     'presslight': 'PressLight',
     'webster': 'Webster',
@@ -127,8 +128,10 @@ def main() -> int:
     document = dict(
         schema_version=1,
         updated_at=datetime.now(timezone.utc).isoformat(),
-        source=dict(campaign='baseline-a40', flows=7, seeds=len(seeds),
-                    protocol='SUMO, 3,600 s episode, 3 seeds per condition'),
+        source=dict(campaign='baseline-a40 + baseline_rlfix', flows=7, seeds=len(seeds),
+                    protocol='SUMO, 3,600 s episode, 3 seeds per condition',
+                    notes='RL scores are the fixed-feature reruns; Max Pressure is the '
+                          'published pressure controller.'),
         family=FAMILY,
         models=models,
         aggregates=aggregates,

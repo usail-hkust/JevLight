@@ -21,6 +21,7 @@ RECORDS = ROOT / 'results/experiments/records'
 LEGACY_CSV = ROOT / 'results/decision_models/2a800/experiment_records.csv'
 BENCHMARK = ROOT / 'assets/benchmark.json'
 BASELINES = ROOT / 'assets/baselines.json'
+VISUAL = ROOT / 'assets/visual.json'
 
 METRICS = ('att', 'awt', 'aql')
 
@@ -136,7 +137,8 @@ def load_baselines():
 
     They are kept as mode ``baseline`` so they never enter the JevLight /
     CoJevLight table, but they are scored on the same per-(flow, metric) columns
-    as the decision models.
+    as the decision models. The published MaxPressure is also copied to mode
+    ``maxpressure`` because the page draws it as the dashed reference line.
     """
     if not BASELINES.is_file():
         return [], []
@@ -146,6 +148,24 @@ def load_baselines():
         aggregates.append(dict(model=entry['model'], flow=entry['flow'], mode='baseline',
                                seeds=entry['seeds'], n=entry['n'], metrics=entry['metrics']))
     models = [dict(id=m['id'], name=m['name'], kind='baseline')
+              for m in document.get('models', [])]
+    return aggregates, models
+
+
+def load_visual():
+    """Aggregates for the visual agents, published by export_visual.py.
+
+    They publish as their own mode, ``vlalight``: the rendered-camera variant
+    of the cooperative decision loop, parallel to JevLight and CoJevLight.
+    """
+    if not VISUAL.is_file():
+        return [], []
+    document = json.loads(VISUAL.read_text())
+    aggregates = []
+    for entry in document.get('aggregates', []):
+        aggregates.append(dict(model=entry['model'], flow=entry['flow'], mode='vlalight',
+                               seeds=entry['seeds'], n=entry['n'], metrics=entry['metrics']))
+    models = [dict(id=m['id'], name=m['name'], kind='visual')
               for m in document.get('models', [])]
     return aggregates, models
 
@@ -162,33 +182,47 @@ def main():
     newest = aggregate(runs)
     baseline_aggregates, baseline_models = load_baselines()
     baselined = {m['id'] for m in baseline_models}
+    visual_aggregates, visual_models = load_visual()
+    visual = {m['id'] for m in visual_models}
+
+    # The dashed reference line and the Traditional row are the same
+    # controller; derive both from the published MaxPressure runs.
+    reference_aggregates = [dict(entry, mode='maxpressure')
+                            for entry in baseline_aggregates if entry['model'] == 'maxpressure']
 
     # Keep published models that this checkout has no results for: their numbers
     # came from elsewhere and must not silently disappear from the page. The
-    # baseline mode is the exception: baselines.json is its only source, so a
-    # baseline it no longer lists (e.g. a renamed id) is dropped, not kept.
+    # baseline, reference and visual modes are the exception: their JSON files
+    # are the only source, so an entry they no longer list is dropped, not kept.
     new_keys = {(a['model'], a['flow'], a['mode']) for a in newest}
+    owned_modes = ('baseline', 'maxpressure', 'vlalight')
     kept = [a for a in existing.get('aggregates', [])
-            if (a['model'], a['flow'], a['mode']) not in new_keys and a['mode'] != 'baseline']
+            if (a['model'], a['flow'], a['mode']) not in new_keys
+            and a['mode'] not in owned_modes]
 
     names = display_names()
     baseline_names = {m['id']: m['name'] for m in baseline_models}
+    visual_names = {m['id']: m['name'] for m in visual_models}
     models = []
-    for model in sorted(new_models | {a['model'] for a in kept} | baselined):
+    for model in sorted(new_models | {a['model'] for a in kept} | baselined | visual):
         previous = next((m for m in existing.get('models', []) if m['id'] == model), None)
         models.append(dict(id=model,
-                           name=baseline_names.get(model) or (previous or {}).get('name')
+                           name=baseline_names.get(model) or visual_names.get(model)
+                                or (previous or {}).get('name')
                                 or names.get(model)
                                 or NAME_OVERRIDES.get(model) or default_name(model),
                            kind='baseline' if model in baselined
+                                else 'visual' if model in visual
                                 else (previous or {}).get('kind', 'native')))
 
-    aggregates = sorted(newest + baseline_aggregates + kept,
+    aggregates = sorted(newest + baseline_aggregates + reference_aggregates
+                        + visual_aggregates + kept,
                         key=lambda a: (a['model'], a['flow'], a['mode']))
     published = published_runs([r for r in runs if r['source'] == 'record'])
 
     print('records aggregated : %d runs' % len(runs))
     print('baseline groups    : %d (%d models)' % (len(baseline_aggregates), len(baseline_models)))
+    print('visual groups      : %d (%d models)' % (len(visual_aggregates), len(visual_models)))
     print('models             : %d published, %d from this checkout' % (len(models), len(new_models)))
     print('aggregate groups   : %d rebuilt + %d kept = %d' % (len(newest), len(kept), len(aggregates)))
     if args.summary_only:

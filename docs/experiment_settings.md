@@ -25,6 +25,13 @@
 - 控制统一为共享控制文件：`pause`（跑完当前场次后停）、`resume`、`interrupt --target all|<模型>|<条件 id>`（立即中断单场）、`stop`。卡死看门狗按日志增长判定，连续失败的条件进 `blocked.json` 跳过，避免单场拖住整张卡。
 - 模型顺序、batch 上限与两个节点的 GPU/端口/环境见 `config/decision_models/global_queue.json`。
 
+## 视觉实验（VLALight）
+
+- 模型：开源视觉模型 WeMM-JEV、d3-turbo、Amos 1 Large，以及合作者的 VLALight-4B；每个模型 7 flow × 3 seed = 21 场，共 84 场。
+- 协议与文本实验相同：`count=3600`、`duration=15`、`eightphase=false`、`fallback=previous`，每场 8 个并发请求、120 s 超时；输入为 SUMO 渲染的四方向相机图，使用两阶段视觉 agent 并开启 `--visual_cooperation`。
+- 结果按 `vlalight` 模式发布在 `assets/visual.json`，与 JevLight / CoJevLight 并列；文本指标仍是 ATT / AWT / AQL，视觉场的渲染和仿真时间不计入模型 serving 成本。
+- 视觉实验需要独立 checkout（`JevLight-vision` / `JevLight-vision-vla`）和作者模型环境，不进入文本模型队列。
+
 ## 不变原则
 
 - **信息边界**：普通仅本路口当前信息，使用本地压力偏好以及正确的方向、等待时间和容量统计；Co 只增加直接上下游邻居当前状态，启发式排名仅供 Co 参考。两模式均逐路口输入（`packaging=per_intersection`），不输入历史或全网状态，`cojev_history_steps=0`。
