@@ -84,6 +84,8 @@ See [config/README.md](config/README.md) for examples. Results, downloaded weigh
 
 The frozen catalog in `scripts/model_downloads/models.json` includes 21 checkpoints across Laya, GLiNER2.5-Decide, Agent-Jev, Kev, Decider, Von, Clef, Bespoke-Nimble, Valen, Lev and Open-Jev. Each checkpoint has a `config/<model>/serving.toml` and per-model download entry point. See [model preparation](scripts/model_downloads/README.md).
 
+Valen-Decision-1.5 (0.8B/2B/4B) is catalogued as its own family, `valen-decision-1.5`, with runtime classes separate from Valen 1.0; see [Valen-Decision-1.5](scripts/model_downloads/README.md#valen-decision-15).
+
 Prepare the model, start its service, then run a selected experiment. The example
 below uses Laya; consult the [environment and runtime table](scripts/model_downloads/README.md#serving-and-validation)
 for the other checkpoints.

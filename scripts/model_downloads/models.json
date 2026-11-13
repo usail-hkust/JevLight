@@ -132,5 +132,23 @@
     "revision": "32e7d35d74db615c4a059181efbf21c5421f3561",
     "license": "apache-2.0",
     "family": "startlux"
+  },
+  "valen-decision-1.5-0.8b": {
+    "model_id": "Valen-Team/Valen-Decision-1.5-0.8B",
+    "revision": "e079395fe9b8e0763b384af403e636e91c1a1559",
+    "license": "apache-2.0",
+    "family": "valen-decision-1.5"
+  },
+  "valen-decision-1.5-2b": {
+    "model_id": "Valen-Team/Valen-Decision-1.5-2B",
+    "revision": "1b890606578ba0f40bb70ed46891ab65f778e76d",
+    "license": "apache-2.0",
+    "family": "valen-decision-1.5"
+  },
+  "valen-decision-1.5-4b": {
+    "model_id": "Valen-Team/Valen-Decision-1.5-4B",
+    "revision": "9b0cacc976d7fb72f252ee1adb1564f5f15e462c",
+    "license": "apache-2.0",
+    "family": "valen-decision-1.5"
   }
 }

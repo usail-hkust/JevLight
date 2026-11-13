@@ -31,7 +31,8 @@ def cpu_runtime(config):
     from transformers import AutoTokenizer
     import jevlight.backends.decision_model_service as service
     torch.set_num_threads(1)
-    family = {'agent-jev': 'agent', 'open-jev': 'openjev'}.get(config['family'], config['family'])
+    family = {'agent-jev': 'agent', 'open-jev': 'openjev',
+              'valen-decision-1.5': 'valen_decision15'}.get(config['family'], config['family'])
     weights = ROOT / config['weights_path']
     tokenizer_path = weights / 'tokenizer' if family == 'laya' else weights
     if not (tokenizer_path / 'tokenizer_config.json').exists():
@@ -42,7 +43,8 @@ def cpu_runtime(config):
     classes = dict(laya=service.LayaNative, kev=service.KevNative, agent=service.AgentNative,
                    decider=service.DeciderNative, clef=service.ClefNative, valen=service.ValenNative,
                    openjev=service.OpenJevNative, nimble=service.NimbleNative, von=service.VonNative,
-                   lev=service.LevNative, gliner2=service.GlinerNative)
+                   lev=service.LevNative, gliner2=service.GlinerNative,
+                   valen_decision15=service.ValenDecision15Native)
     # Use the very same encode methods as serving, supplying only encoding dependencies.
     runtime = classes[family].__new__(classes[family])
     runtime.audit_tokenizer_path = str(tokenizer_path)
@@ -85,6 +87,16 @@ def cpu_runtime(config):
         package = ModuleType('audit_valen'); package.__path__ = [str(weights)]
         sys.modules[package.__name__] = package
         compiler = importlib.import_module('audit_valen.compiler')
+        processor = AutoProcessor.from_pretrained(str(weights), trust_remote_code=True, local_files_only=True)
+        runtime.compiler = compiler.Compiler(processor, max_length=config['max_length'], execution='shared_state')
+    elif family == 'valen_decision15':
+        from transformers import AutoProcessor
+        published = json.loads((weights / 'config.json').read_text())
+        if published.get('valen_decision_version') != '1.5':
+            raise ValueError('Checkpoint is not a Valen-Decision-1.5 release')
+        package = ModuleType('audit_valen_decision15'); package.__path__ = [str(weights)]
+        sys.modules[package.__name__] = package
+        compiler = importlib.import_module('audit_valen_decision15.compiler')
         processor = AutoProcessor.from_pretrained(str(weights), trust_remote_code=True, local_files_only=True)
         runtime.compiler = compiler.Compiler(processor, max_length=config['max_length'], execution='shared_state')
     elif family == 'openjev':
