@@ -9,6 +9,13 @@ ROOT=Path(__file__).resolve().parents[2]
 class PoolingNativeBase:
     emits_gpu_chunk_progress=True
 
+    def pooling_registration(self):
+        """Qualified architectures, worker class and process-local registration."""
+        from jevlight.backends.native_pooling_registry import (
+            NATIVE_POOLING_ARCHITECTURES, NATIVE_POOLING_WORKER,
+            register_native_pooling_models)
+        return NATIVE_POOLING_ARCHITECTURES,NATIVE_POOLING_WORKER,register_native_pooling_models
+
     def initialize_engine(self,config,source,*,task='token_embed',architecture='NativeMarkerEngine',**options):
         import torch
         from jevlight.backends.cuda_runtime import prepare_cuda_device, configure_cpu_threads
@@ -20,9 +27,7 @@ class PoolingNativeBase:
             install_fp32_lora_linear()
         from vllm import LLM
         from vllm.config import PoolerConfig
-        from jevlight.backends.native_pooling_registry import (
-            NATIVE_POOLING_ARCHITECTURES, NATIVE_POOLING_WORKER,
-            register_native_pooling_models)
+        NATIVE_POOLING_ARCHITECTURES,NATIVE_POOLING_WORKER,register_native_pooling_models=self.pooling_registration()
         if architecture not in NATIVE_POOLING_ARCHITECTURES:
             raise ValueError('Unqualified native pooling architecture')
         parallel_size=config.get('engine_tensor_parallel_size',1)

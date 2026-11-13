@@ -65,6 +65,20 @@ def enable_valen_full_rows(runtime):
     model.forward_state_batch = MethodType(full_rows, model)
 
 
+def enable_valen_decision15_full_rows(runtime):
+    """Valen-Decision-1.5 counterpart of enable_valen_full_rows; block masks stay per row."""
+    model = runtime.model
+    if hasattr(model, '_step_decision15_state_batch'):
+        return
+    model._step_decision15_state_batch = model.forward_state_batch
+    def full_rows(self, states, max_tokens=32768):
+        # CUDA capacity selection, not the author's 32K scheduling budget,
+        # decides how many independent shared-state rows share one forward.
+        budget = max(max_tokens, len(states) * max(state.compute_tokens for state in states)) if states else max_tokens
+        return self._step_decision15_state_batch(states, max_tokens=budget)
+    model.forward_state_batch = MethodType(full_rows, model)
+
+
 def enable_valen_native_shapes(runtime):
     """Preserve each native projection's shape inside a shared GPU forward."""
     import threading

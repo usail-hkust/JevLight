@@ -234,6 +234,26 @@ def _valen_batch(self, requests, batch_size):
     return results
 
 
+def _valen_decision15_batch(self, requests, batch_size):
+    import torch
+    if any(self.visual(request) for request in requests):
+        # Image and bbox requests keep the release's own single-request path.
+        return [self.native(request) for request in requests]
+    answer = importlib.import_module(type(self.model).__module__.rsplit('.',1)[0]+'.responses').answer
+    compiled = [self.compile(request) for request in requests]
+    # One padded forward for the whole group: the dense block mask is built per
+    # row from the compiler's segments, and measured GPU memory sets capacity.
+    budget = max(32768, len(compiled) * max(state.compute_tokens for state in compiled))
+    with torch.inference_mode():
+        rows = self.model.forward_state_batch(compiled, max_tokens=budget)
+    results = []
+    for state, logits in zip(compiled, rows, strict=True):
+        answers = {q.qid:answer(q,z,1.0) for q,z in zip(state.questions,logits,strict=True)}
+        results.append(dict(model=self.model.model_name, answers=answers,
+                            usage={'input_tokens':state.logical_tokens,'output_tokens':0}))
+    return results
+
+
 def _resource_error(error):
     import torch
     return isinstance(error, torch.cuda.OutOfMemoryError) or (
@@ -350,6 +370,7 @@ def install(backend, *, attention='native'):
         from jevlight.backends.native_flash_batch import enable_native_flash
         enable_native_flash(runtime.model.encoder)
     elif family=='valen':runtime.native_batch=MethodType(_valen_batch,runtime)
+    elif family=='valen-decision-1.5':runtime.native_batch=MethodType(_valen_decision15_batch,runtime)
     elif family=='agent-jev':runtime.native_batch=MethodType(_agent_batch,runtime)
     elif family=='kev':
         from jevlight.backends.kev_prefix_batch import enable_kev_prefix_batch
