@@ -93,6 +93,11 @@ def main() -> int:
                         help='export of eval records ({"runs": [...]}); repeatable')
     parser.add_argument('--write', action='store_true', help=f'replace {OUT.relative_to(ROOT)}')
     parser.add_argument('--summary-only', action='store_true')
+    parser.add_argument('--campaign', default='baseline-a40 + baseline_rlfix',
+                        help='value stored in source.campaign')
+    parser.add_argument('--notes', default='RL scores are the fixed-feature reruns; '
+                        'Max Pressure is the published pressure controller.',
+                        help='value stored in source.notes')
     args = parser.parse_args()
 
     runs = []
@@ -128,10 +133,9 @@ def main() -> int:
     document = dict(
         schema_version=1,
         updated_at=datetime.now(timezone.utc).isoformat(),
-        source=dict(campaign='baseline-a40 + baseline_rlfix', flows=7, seeds=len(seeds),
+        source=dict(campaign=args.campaign, flows=7, seeds=len(seeds),
                     protocol='SUMO, 3,600 s episode, 3 seeds per condition',
-                    notes='RL scores are the fixed-feature reruns; Max Pressure is the '
-                          'published pressure controller.'),
+                    notes=args.notes),
         family=FAMILY,
         models=models,
         aggregates=aggregates,

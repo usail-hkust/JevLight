@@ -1,10 +1,10 @@
 window.JEV_COMPOSITE = {
  "schema_version": 1,
- "generated_at": "2026-11-12T15:16:45.656618+00:00",
+ "generated_at": "2026-11-23T06:41:03.631792+00:00",
  "source": {
   "benchmark": "benchmark.json",
   "telemetry": "telemetry.json",
-  "benchmark_updated_at": "2026-11-12T14:52:40.392329+00:00",
+  "benchmark_updated_at": "2026-11-23T06:40:58.727133+00:00",
   "configurations": 60,
   "telemetry_runs": 1260,
   "seeds": 3,
@@ -9687,151 +9687,298 @@ window.JEV_COMPOSITE = {
  },
  "traditional": [
   {
+   "id": "citylight",
+   "name": "CityLight",
+   "mode": "baseline",
+   "family": "traditional:citylight",
+   "family_label": "CityLight",
+   "color": "#e9c46a",
+   "score": 84.66,
+   "cells": {
+    "jinan-1": {
+     "att": {
+      "raw": 340.658,
+      "sd": 2.814,
+      "score": 95.44
+     },
+     "awt": {
+      "raw": 77.089,
+      "sd": 1.981,
+      "score": 90.02
+     },
+     "aql": {
+      "raw": 134.527,
+      "sd": 3.456,
+      "score": 88.67
+     }
+    },
+    "jinan-2": {
+     "att": {
+      "raw": 326.068,
+      "sd": 0.382,
+      "score": 95.49
+     },
+     "awt": {
+      "raw": 61.52,
+      "sd": 0.406,
+      "score": 87.03
+     },
+     "aql": {
+      "raw": 74.428,
+      "sd": 0.485,
+      "score": 86.02
+     }
+    },
+    "jinan-3": {
+     "att": {
+      "raw": 318.649,
+      "sd": 0.742,
+      "score": 95.71
+     },
+     "awt": {
+      "raw": 62.649,
+      "sd": 0.518,
+      "score": 88.91
+     },
+     "aql": {
+      "raw": 95.388,
+      "sd": 0.779,
+      "score": 87.75
+     }
+    },
+    "hangzhou-1": {
+     "att": {
+      "raw": 359.112,
+      "sd": 0.576,
+      "score": 96.63
+     },
+     "awt": {
+      "raw": 40.132,
+      "sd": 0.206,
+      "score": 88.32
+     },
+     "aql": {
+      "raw": 33.18,
+      "sd": 0.162,
+      "score": 87.18
+     }
+    },
+    "hangzhou-2": {
+     "att": {
+      "raw": 392.328,
+      "sd": 2.171,
+      "score": 94.52
+     },
+     "awt": {
+      "raw": 86.342,
+      "sd": 2.14,
+      "score": 89.06
+     },
+     "aql": {
+      "raw": 149.291,
+      "sd": 4.25,
+      "score": 84.28
+     }
+    },
+    "newyork-1": {
+     "att": {
+      "raw": 1053.325,
+      "sd": 2.294,
+      "score": 78.75
+     },
+     "awt": {
+      "raw": 584.367,
+      "sd": 4.078,
+      "score": 77.27
+     },
+     "aql": {
+      "raw": 1470.926,
+      "sd": 13.137,
+      "score": 71.07
+     }
+    },
+    "newyork-2": {
+     "att": {
+      "raw": 1367.711,
+      "sd": 32.756,
+      "score": 71.39
+     },
+     "awt": {
+      "raw": 975.828,
+      "sd": 37.406,
+      "score": 67.43
+     },
+     "aql": {
+      "raw": 3015.872,
+      "sd": 117.789,
+      "score": 56.95
+     }
+    }
+   },
+   "cost": {
+    "gpu_seconds": 235.7,
+    "wall_seconds": 102.0,
+    "gpus": 1,
+    "hosted": false,
+    "basis": "wall clock x 1 GPU",
+    "by_flow": {
+     "jinan-1": 147.6,
+     "jinan-2": 58.1,
+     "jinan-3": 62.4,
+     "hangzhou-1": 102.0,
+     "hangzhou-2": 83.6,
+     "newyork-1": 539.7,
+     "newyork-2": 656.6
+    }
+   },
+   "rank": 1
+  },
+  {
    "id": "colight",
    "name": "CoLight",
    "mode": "baseline",
    "family": "traditional:colight",
    "family_label": "CoLight",
    "color": "#f4a261",
-   "score": 84.83,
+   "score": 83.96,
    "cells": {
     "jinan-1": {
      "att": {
-      "raw": 325.147,
-      "sd": 2.051,
-      "score": 98.45
+      "raw": 319.401,
+      "sd": 0.348,
+      "score": 99.6
      },
      "awt": {
-      "raw": 66.301,
-      "sd": 1.433,
-      "score": 94.77
+      "raw": 60.853,
+      "sd": 0.305,
+      "score": 97.47
      },
      "aql": {
-      "raw": 115.647,
-      "sd": 2.501,
-      "score": 94.06
+      "raw": 106.14,
+      "sd": 0.541,
+      "score": 97.12
      }
     },
     "jinan-2": {
      "att": {
-      "raw": 318.281,
-      "sd": 1.096,
-      "score": 96.95
+      "raw": 312.667,
+      "sd": 0.985,
+      "score": 98.03
      },
      "awt": {
-      "raw": 55.034,
-      "sd": 0.33,
-      "score": 90.1
+      "raw": 49.117,
+      "sd": 0.285,
+      "score": 93.25
      },
      "aql": {
-      "raw": 66.57,
-      "sd": 0.4,
-      "score": 89.34
+      "raw": 59.386,
+      "sd": 0.355,
+      "score": 92.73
      }
     },
     "jinan-3": {
      "att": {
-      "raw": 309.22,
-      "sd": 1.163,
-      "score": 97.61
+      "raw": 305.23,
+      "sd": 1.143,
+      "score": 98.43
      },
      "awt": {
-      "raw": 55.633,
-      "sd": 0.577,
-      "score": 92.38
+      "raw": 51.512,
+      "sd": 0.72,
+      "score": 94.64
      },
      "aql": {
-      "raw": 84.677,
-      "sd": 0.872,
-      "score": 91.59
+      "raw": 78.382,
+      "sd": 1.084,
+      "score": 94.08
      }
     },
     "hangzhou-1": {
      "att": {
-      "raw": 356.045,
-      "sd": 0.812,
-      "score": 97.2
+      "raw": 354.839,
+      "sd": 2.741,
+      "score": 97.43
      },
      "awt": {
-      "raw": 39.579,
-      "sd": 0.214,
-      "score": 88.66
+      "raw": 37.293,
+      "sd": 1.533,
+      "score": 90.15
      },
      "aql": {
-      "raw": 32.728,
-      "sd": 0.179,
-      "score": 87.56
+      "raw": 30.826,
+      "sd": 1.259,
+      "score": 89.2
      }
     },
     "hangzhou-2": {
      "att": {
-      "raw": 481.357,
-      "sd": 19.316,
-      "score": 75.07
+      "raw": 467.074,
+      "sd": 22.503,
+      "score": 77.93
      },
      "awt": {
-      "raw": 211.367,
-      "sd": 15.385,
-      "score": 55.06
+      "raw": 205.635,
+      "sd": 30.259,
+      "score": 56.11
      },
      "aql": {
-      "raw": 298.494,
-      "sd": 12.522,
-      "score": 51.7
+      "raw": 346.057,
+      "sd": 41.315,
+      "score": 44.74
      }
     },
     "newyork-1": {
      "att": {
-      "raw": 963.928,
-      "sd": 4.171,
-      "score": 89.48
+      "raw": 997.656,
+      "sd": 33.401,
+      "score": 85.32
      },
      "awt": {
-      "raw": 518.119,
-      "sd": 8.647,
-      "score": 85.18
+      "raw": 559.259,
+      "sd": 41.525,
+      "score": 80.16
      },
      "aql": {
-      "raw": 1338.372,
-      "sd": 14.182,
-      "score": 79.0
+      "raw": 1423.322,
+      "sd": 124.028,
+      "score": 73.83
      }
     },
     "newyork-2": {
      "att": {
-      "raw": 1268.834,
-      "sd": 17.12,
-      "score": 83.36
+      "raw": 1327.148,
+      "sd": 41.645,
+      "score": 76.19
      },
      "awt": {
-      "raw": 884.822,
-      "sd": 31.567,
-      "score": 76.56
+      "raw": 963.786,
+      "sd": 53.614,
+      "score": 68.59
      },
      "aql": {
-      "raw": 2784.077,
-      "sd": 71.07,
-      "score": 67.41
+      "raw": 2988.269,
+      "sd": 142.632,
+      "score": 58.15
      }
     }
    },
    "cost": {
-    "gpu_seconds": 238.1,
-    "wall_seconds": 80.4,
+    "gpu_seconds": 285.1,
+    "wall_seconds": 92.0,
     "gpus": 1,
     "hosted": false,
     "basis": "wall clock x 1 GPU",
     "by_flow": {
-     "jinan-1": 80.4,
-     "jinan-2": 70.3,
-     "jinan-3": 70.3,
-     "hangzhou-1": 70.3,
-     "hangzhou-2": 90.4,
-     "newyork-1": 582.2,
-     "newyork-2": 702.7
+     "jinan-1": 142.3,
+     "jinan-2": 54.7,
+     "jinan-3": 61.2,
+     "hangzhou-1": 92.0,
+     "hangzhou-2": 88.1,
+     "newyork-1": 706.7,
+     "newyork-2": 850.5
     }
    },
-   "rank": 1
+   "rank": 2
   },
   {
    "id": "maxpressure",
@@ -9976,153 +10123,6 @@ window.JEV_COMPOSITE = {
      "hangzhou-2": 69.3,
      "newyork-1": 520.1,
      "newyork-2": 666.1
-    }
-   },
-   "rank": 2
-  },
-  {
-   "id": "citylight",
-   "name": "CityLight",
-   "mode": "baseline",
-   "family": "traditional:citylight",
-   "family_label": "CityLight",
-   "color": "#e9c46a",
-   "score": 81.8,
-   "cells": {
-    "jinan-1": {
-     "att": {
-      "raw": 342.042,
-      "sd": 0.641,
-      "score": 95.18
-     },
-     "awt": {
-      "raw": 78.86,
-      "sd": 0.125,
-      "score": 89.31
-     },
-     "aql": {
-      "raw": 137.624,
-      "sd": 0.215,
-      "score": 87.86
-     }
-    },
-    "jinan-2": {
-     "att": {
-      "raw": 329.783,
-      "sd": 2.19,
-      "score": 94.81
-     },
-     "awt": {
-      "raw": 64.089,
-      "sd": 1.119,
-      "score": 85.9
-     },
-     "aql": {
-      "raw": 77.557,
-      "sd": 1.341,
-      "score": 84.8
-     }
-    },
-    "jinan-3": {
-     "att": {
-      "raw": 322.813,
-      "sd": 0.607,
-      "score": 94.89
-     },
-     "awt": {
-      "raw": 66.128,
-      "sd": 0.636,
-      "score": 87.32
-     },
-     "aql": {
-      "raw": 100.702,
-      "sd": 0.969,
-      "score": 86.01
-     }
-    },
-    "hangzhou-1": {
-     "att": {
-      "raw": 360.483,
-      "sd": 0.944,
-      "score": 96.38
-     },
-     "awt": {
-      "raw": 40.818,
-      "sd": 0.48,
-      "score": 87.89
-     },
-     "aql": {
-      "raw": 33.756,
-      "sd": 0.397,
-      "score": 86.71
-     }
-    },
-    "hangzhou-2": {
-     "att": {
-      "raw": 405.446,
-      "sd": 9.904,
-      "score": 91.39
-     },
-     "awt": {
-      "raw": 111.156,
-      "sd": 12.569,
-      "score": 79.47
-     },
-     "aql": {
-      "raw": 196.402,
-      "sd": 24.18,
-      "score": 71.38
-     }
-    },
-    "newyork-1": {
-     "att": {
-      "raw": 1114.457,
-      "sd": 94.91,
-      "score": 71.93
-     },
-     "awt": {
-      "raw": 690.807,
-      "sd": 160.889,
-      "score": 66.26
-     },
-     "aql": {
-      "raw": 1626.051,
-      "sd": 313.143,
-      "score": 62.65
-     }
-    },
-    "newyork-2": {
-     "att": {
-      "raw": 1358.078,
-      "sd": 41.415,
-      "score": 72.52
-     },
-     "awt": {
-      "raw": 987.298,
-      "sd": 50.809,
-      "score": 66.34
-     },
-     "aql": {
-      "raw": 2974.987,
-      "sd": 133.421,
-      "score": 58.73
-     }
-    }
-   },
-   "cost": {
-    "gpu_seconds": 235.2,
-    "wall_seconds": 80.3,
-    "gpus": 1,
-    "hosted": false,
-    "basis": "wall clock x 1 GPU",
-    "by_flow": {
-     "jinan-1": 80.3,
-     "jinan-2": 70.3,
-     "jinan-3": 70.3,
-     "hangzhou-1": 70.3,
-     "hangzhou-2": 100.4,
-     "newyork-1": 562.3,
-     "newyork-2": 692.8
     }
    },
    "rank": 3
@@ -10275,6 +10275,153 @@ window.JEV_COMPOSITE = {
    "rank": 4
   },
   {
+   "id": "presslight",
+   "name": "PressLight",
+   "mode": "baseline",
+   "family": "traditional:presslight",
+   "family_label": "PressLight",
+   "color": "#38bdf8",
+   "score": 74.04,
+   "cells": {
+    "jinan-1": {
+     "att": {
+      "raw": 334.339,
+      "sd": 0.79,
+      "score": 96.65
+     },
+     "awt": {
+      "raw": 70.133,
+      "sd": 0.766,
+      "score": 93.0
+     },
+     "aql": {
+      "raw": 122.354,
+      "sd": 1.345,
+      "score": 92.05
+     }
+    },
+    "jinan-2": {
+     "att": {
+      "raw": 317.028,
+      "sd": 1.218,
+      "score": 97.19
+     },
+     "awt": {
+      "raw": 52.213,
+      "sd": 0.668,
+      "score": 91.56
+     },
+     "aql": {
+      "raw": 63.144,
+      "sd": 0.804,
+      "score": 90.9
+     }
+    },
+    "jinan-3": {
+     "att": {
+      "raw": 313.128,
+      "sd": 2.493,
+      "score": 96.81
+     },
+     "awt": {
+      "raw": 55.906,
+      "sd": 1.406,
+      "score": 92.24
+     },
+     "aql": {
+      "raw": 85.091,
+      "sd": 2.141,
+      "score": 91.44
+     }
+    },
+    "hangzhou-1": {
+     "att": {
+      "raw": 376.123,
+      "sd": 0.843,
+      "score": 93.56
+     },
+     "awt": {
+      "raw": 53.537,
+      "sd": 1.17,
+      "score": 81.1
+     },
+     "aql": {
+      "raw": 44.297,
+      "sd": 0.971,
+      "score": 79.27
+     }
+    },
+    "hangzhou-2": {
+     "att": {
+      "raw": 409.292,
+      "sd": 3.788,
+      "score": 90.49
+     },
+     "awt": {
+      "raw": 97.961,
+      "sd": 4.047,
+      "score": 84.27
+     },
+     "aql": {
+      "raw": 158.319,
+      "sd": 6.096,
+      "score": 81.52
+     }
+    },
+    "newyork-1": {
+     "att": {
+      "raw": 1476.305,
+      "sd": 15.466,
+      "score": 37.91
+     },
+     "awt": {
+      "raw": 1147.809,
+      "sd": 16.974,
+      "score": 32.88
+     },
+     "aql": {
+      "raw": 2561.712,
+      "sd": 17.249,
+      "score": 24.48
+     }
+    },
+    "newyork-2": {
+     "att": {
+      "raw": 1640.008,
+      "sd": 2.341,
+      "score": 42.44
+     },
+     "awt": {
+      "raw": 1349.525,
+      "sd": 4.981,
+      "score": 37.19
+     },
+     "aql": {
+      "raw": 3765.818,
+      "sd": 20.353,
+      "score": 27.9
+     }
+    }
+   },
+   "cost": {
+    "gpu_seconds": 323.8,
+    "wall_seconds": 126.7,
+    "gpus": 1,
+    "hosted": false,
+    "basis": "wall clock x 1 GPU",
+    "by_flow": {
+     "jinan-1": 169.7,
+     "jinan-2": 70.0,
+     "jinan-3": 75.9,
+     "hangzhou-1": 126.7,
+     "hangzhou-2": 97.6,
+     "newyork-1": 802.7,
+     "newyork-2": 924.1
+    }
+   },
+   "rank": 5
+  },
+  {
    "id": "attendlight",
    "name": "AttendLight",
    "mode": "baseline",
@@ -10419,7 +10566,7 @@ window.JEV_COMPOSITE = {
      "newyork-2": 944.2
     }
    },
-   "rank": 5
+   "rank": 6
   },
   {
    "id": "advanceddqn",
@@ -10564,153 +10711,6 @@ window.JEV_COMPOSITE = {
      "hangzhou-2": 200.9,
      "newyork-1": 783.7,
      "newyork-2": 924.2
-    }
-   },
-   "rank": 6
-  },
-  {
-   "id": "presslight",
-   "name": "PressLight",
-   "mode": "baseline",
-   "family": "traditional:presslight",
-   "family_label": "PressLight",
-   "color": "#38bdf8",
-   "score": 59.41,
-   "cells": {
-    "jinan-1": {
-     "att": {
-      "raw": 336.249,
-      "sd": 4.03,
-      "score": 96.29
-     },
-     "awt": {
-      "raw": 75.023,
-      "sd": 3.194,
-      "score": 90.88
-     },
-     "aql": {
-      "raw": 130.924,
-      "sd": 5.595,
-      "score": 89.64
-     }
-    },
-    "jinan-2": {
-     "att": {
-      "raw": 319.082,
-      "sd": 0.561,
-      "score": 96.8
-     },
-     "awt": {
-      "raw": 53.732,
-      "sd": 0.964,
-      "score": 90.77
-     },
-     "aql": {
-      "raw": 64.977,
-      "sd": 1.152,
-      "score": 90.05
-     }
-    },
-    "jinan-3": {
-     "att": {
-      "raw": 314.813,
-      "sd": 2.73,
-      "score": 96.47
-     },
-     "awt": {
-      "raw": 58.997,
-      "sd": 2.125,
-      "score": 90.67
-     },
-     "aql": {
-      "raw": 89.804,
-      "sd": 3.236,
-      "score": 89.7
-     }
-    },
-    "hangzhou-1": {
-     "att": {
-      "raw": 620.503,
-      "sd": 47.448,
-      "score": 60.32
-     },
-     "awt": {
-      "raw": 322.137,
-      "sd": 51.294,
-      "score": 36.18
-     },
-     "aql": {
-      "raw": 254.58,
-      "sd": 28.395,
-      "score": 31.35
-     }
-    },
-    "hangzhou-2": {
-     "att": {
-      "raw": 559.855,
-      "sd": 41.493,
-      "score": 60.7
-     },
-     "awt": {
-      "raw": 286.411,
-      "sd": 54.998,
-      "score": 43.53
-     },
-     "aql": {
-      "raw": 431.236,
-      "sd": 42.124,
-      "score": 34.39
-     }
-    },
-    "newyork-1": {
-     "att": {
-      "raw": 1552.397,
-      "sd": 19.309,
-      "score": 31.83
-     },
-     "awt": {
-      "raw": 1282.025,
-      "sd": 17.343,
-      "score": 25.6
-     },
-     "aql": {
-      "raw": 2926.244,
-      "sd": 26.053,
-      "score": 13.31
-     }
-    },
-    "newyork-2": {
-     "att": {
-      "raw": 1756.95,
-      "sd": 21.368,
-      "score": 31.46
-     },
-     "awt": {
-      "raw": 1482.348,
-      "sd": 28.875,
-      "score": 28.44
-     },
-     "aql": {
-      "raw": 4020.719,
-      "sd": 5.052,
-      "score": 19.33
-     }
-    }
-   },
-   "cost": {
-    "gpu_seconds": 380.1,
-    "wall_seconds": 190.7,
-    "gpus": 1,
-    "hosted": false,
-    "basis": "wall clock x 1 GPU",
-    "by_flow": {
-     "jinan-1": 190.7,
-     "jinan-2": 150.5,
-     "jinan-3": 160.8,
-     "hangzhou-1": 160.4,
-     "hangzhou-2": 220.5,
-     "newyork-1": 833.6,
-     "newyork-2": 944.0
     }
    },
    "rank": 7
