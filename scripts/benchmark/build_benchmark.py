@@ -41,6 +41,9 @@ NAME_OVERRIDES = {
     'startlux-4b': 'StartLux 4B',
     'startlux-9b': 'StartLux 9B',
     'startlux-27b': 'StartLux 27B',
+    'valen-decision-1.5-0.8b': 'Valen-Decision-1.5 0.8B',
+    'valen-decision-1.5-2b': 'Valen-Decision-1.5 2B',
+    'valen-decision-1.5-4b': 'Valen-Decision-1.5 4B',
 }
 
 

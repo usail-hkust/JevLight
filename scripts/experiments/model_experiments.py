@@ -189,7 +189,7 @@ def main():
             from scripts.experiments.preflight import cpu_preflight
             family = config['family']
             environment = ('encoder' if family in ('laya', 'gliner2', 'agent-jev') else
-                           'valen' if family == 'valen' else 'open-jev' if family == 'open-jev' else 'decoder')
+                           'valen' if family in ('valen', 'valen-decision-1.5') else 'open-jev' if family == 'open-jev' else 'decoder')
             cpu_preflight(ROOT, args.model, args.author_environment or
                           ROOT / 'scripts/model_downloads/environments' / environment)
         selection = load_selection(args.engine_selection)

@@ -18,7 +18,7 @@ Select model keys explicitly, or use `--models all` to select the complete catal
 | `encoder` | Laya, GLiNER2.5-Decide, Agent-Jev |
 | `decoder` | Kev, Von, Decider, Clef, Bespoke-Nimble, Lev |
 | `decision-heads` | d3-flash, d3, Perplexity Decider Flash v1.2 / 27B v1.2 |
-| `valen` | Valen |
+| `valen` | Valen, Valen-Decision-1.5 |
 | `open-jev` | Open-Jev |
 | `pooling-engine` | Optional pooling/marker engine adapters |
 | `native-engine` | Dedicated vLLM author decision heads |
@@ -87,8 +87,8 @@ For the bundled serving profiles, select these environment/runtime combinations:
 | --- | --- | --- |
 | Laya, Laya multilingual, Agent-Jev, GLiNER2.5-Decide | `encoder` | `native` |
 | Kev 0.8B/4B/9B, Clef Flash, Decider 2B, Bespoke-Nimble 9B, Von | `decoder` | `native` |
-| Valen 0.8B/2B | `valen` | `native` |
-| Decider 4B, Valen 4B, Lev, Kev 27B, Clef 27B, Open-Jev 2B/9B | `pooling-engine` | `step` |
+| Valen 0.8B/2B, Valen-Decision-1.5 0.8B/2B | `valen` | `native` |
+| Decider 4B, Valen 4B, Valen-Decision-1.5 4B, Lev, Kev 27B, Clef 27B, Open-Jev 2B/9B | `pooling-engine` | `step` |
 | Open-Jev 27B | `open-jev` | `step` |
 | d3-flash, d3, Perplexity Decider Flash v1.2 / 27B v1.2 | `decision-heads` | `step` |
 
@@ -203,3 +203,108 @@ daemon releases the GPU before the backend loads and resumes afterwards.
 and native request logs stay under `results/experiments/`. Pause, resume,
 interrupt and graceful stop are control files shared by both nodes — see
 `scripts/experiments/global_queue.py` and `docs/experiment_settings.md`.
+
+## Valen-Decision-1.5
+
+`valen-decision-1.5-0.8b`, `-2b` and `-4b` pin `Valen-Team/Valen-Decision-1.5-{0.8B,2B,4B}`
+and select the `valen-decision-1.5` family in `serving.toml`. The family has its own runtime
+classes, so the Valen 1.0 checkpoints keep their existing code path:
+
+| Path | Valen 1.0 (`valen`) | Valen-Decision-1.5 (`valen-decision-1.5`) |
+| --- | --- | --- |
+| Author runtime | `ValenNative` | `ValenDecision15Native` |
+| vLLM pooling runtime | `ValenPoolingNative` | `ValenDecision15PoolingNative` |
+| Engine architecture | `ValenMarkerEngine` | `ValenDecision15MarkerEngine` |
+| Engine config / worker | `ValenConfig`, `NativePoolingWorker` | `ValenDecision15Config`, `ValenDecision15PoolingWorker` |
+
+Both generations publish `model_type = "valen_qwen"`; the 1.5 checkpoints add
+`valen_decision_version = "1.5"`, `valen_full_attention_mask = "bbox_blocks"` and a
+16384-token compiler limit (`valen_max_length`), which `max_length` follows. The block
+mask applies to the full-attention layers: the state prefix is bidirectional and does
+not attend to the question region, the chat-turn glue sees the prefix, and the decision
+questions share one bidirectional block. The author runtime runs the checkpoint's own
+`model.predict` / `forward_state_batch`. The vLLM engine reads the block boundaries
+from the two closing chat turns of each prompt, checks them against the compiler's
+segment ids before every request, and serves each prompt as one complete prefill
+(chunked prefill disabled); the worker reports how many rows ran under the block mask.
+
+### Image states and `bbox` questions
+
+The benchmark sends text states with `choice` and `noul` questions, and the published
+results use nothing else. The author runtime also accepts what Valen-Decision-1.5 adds
+beyond that, so the same local service can be used for image experiments:
+
+- a state of the form `{"messages": [...]}` passes to the checkpoint unchanged and may
+  carry inline PNG or JPEG images as `image_url` data URLs; any other state is serialized
+  to JSON text as before;
+- a `bbox` question (`instructions`, and an optional `image` index when the state has
+  several images) is answered by the checkpoint's grounding head with a normalized
+  `bbox` `[x1, y1, x2, y2]`, its centre `point` and a `confidence`.
+
+```bash
+curl -s http://127.0.0.1:8123/v1/systemone -H 'Content-Type: application/json' -d '{
+  "state": {"messages": [{"role": "user", "content": [
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo..."}},
+    {"type": "text", "text": "A camera view of one junction."}]}]},
+  "questions": {
+    "queue": {"type": "bbox", "instructions": "the longest queue"},
+    "phase": {"type": "choice", "instructions": "Choose the next phase.",
+              "criteria": {"NTST": "north-south through", "ETWT": "east-west through"}}}}'
+```
+
+These requests run one at a time through the checkpoint's own `model.predict`, also when
+they arrive in a batch. `bbox` answers are checked for four ordered edges, a point and a
+confidence in `[0, 1]`; `choice` and `noul` answers in the same request keep the benchmark
+checks. The vLLM pooling runtime is text-only and rejects image states and `bbox`
+questions with an error, so use `inference_engine = "author"` (the bundled 0.8B and 2B
+profiles; override it for 4B). `run_jevlight.py` does not send image states or `bbox`
+questions.
+
+### Recorded validation
+
+One NVIDIA H200, 13 November 2026; `valen` environment with torch 2.8.0+cu128 and
+transformers 5.4.0, `pooling-engine` environment with vLLM 0.19.0 and torch 2.10.0+cu128.
+These are parity checks and single smoke episodes, not benchmark results: nothing here is
+part of `assets/`.
+
+**Benchmark prompts.** The 98 fixed and cooperative prompt cases, compared with the
+checkpoint's own `model.predict` in float32. bfloat16 moves the checkpoint's own answers
+by a few hundredths, so each row is read against that floor and against a control that
+runs the checkpoint under a deliberately wrong causal mask. Probability differences:
+
+| Size | Recording | Median | p90 | Max | Choices differing |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 0.8B | checkpoint in bfloat16 (floor); author runtime, single requests | 0.0023 | 0.0201 | 0.0609 | 0 of 98 |
+| 0.8B | author runtime, one batch of 98 | 0.0027 | 0.0198 | 0.0396 | 0 of 98 |
+| 0.8B | vLLM pooling runtime | 0.0013 | 0.0111 | 0.0237 | 0 of 98 |
+| 0.8B | causal-mask control | 0.1642 | 0.4301 | 0.6934 | 51 of 98 |
+| 2B | checkpoint in bfloat16 (floor); author runtime, single requests | 0.0029 | 0.0095 | 0.0172 | 0 of 98 |
+| 2B | author runtime, one batch of 98 | 0.0023 | 0.0086 | 0.0140 | 2 of 98 |
+| 2B | vLLM pooling runtime | 0.0018 | 0.0081 | 0.0251 | 7 of 98 |
+| 2B | causal-mask control | 0.1293 | 0.3670 | 0.5370 | 25 of 98 |
+| 4B | checkpoint in bfloat16 (floor); author runtime, single requests | 0.0017 | 0.0079 | 0.0221 | 0 of 98 |
+| 4B | author runtime, one batch of 98 | 0.0022 | 0.0080 | 0.0249 | 0 of 98 |
+| 4B | vLLM pooling runtime | 0.0020 | 0.0051 | 0.0132 | 0 of 98 |
+| 4B | causal-mask control | 0.0811 | 0.2571 | 0.4908 | 42 of 98 |
+
+The author runtime answers single requests identically to the checkpoint. The seven 2B
+choices that differ under the vLLM pooling runtime are one repeated phase question whose
+two best phases are 0.04 apart in float32; the bundled 2B profile uses the author runtime.
+
+**Image states and `bbox` questions.** Eight drawings per size, each with two `bbox`
+questions, one `choice` and one `noul`, through `NativeBackend.evaluate` and
+`evaluate_batch`: all 16 boxes and every probability were identical to the checkpoint's
+own `predict`, with equal input-token counts, for 0.8B, 2B and 4B. A batch mixing an image
+request with a text request returned both.
+
+**End to end.** One complete `run_jevlight.py` episode per size with the bundled serving
+profile and `jevlight_jinan-1_s1.json` (3600 simulated seconds), served through
+`scripts.experiments.serve_decision_model`:
+
+| Size | Engine | Model decisions | Failure fallbacks | Errors | AQL | AWT (s) | ATT (s) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.8B | author | 2859 | 0 | 0 | 511.95 | 292.89 | 545.51 |
+| 2B | author | 2865 | 0 | 0 | 880.17 | 514.38 | 749.98 |
+| 4B | vLLM pooling | 2867 | 0 | 0 | 115.42 | 66.15 | 326.55 |
+
+The remaining 42 experiment configs per size were generated but not run.

@@ -17,6 +17,7 @@ class NativeMarkerPooling:
         import importlib
         delegates={'lev':('jevlight.backends.lev_vllm_runtime','LevPoolingNative'),
                    'valen':('jevlight.backends.valen_vllm_runtime','ValenPoolingNative'),
+                   'valen-decision-1.5':('jevlight.backends.valen_decision15_vllm_runtime','ValenDecision15PoolingNative'),
                    'kev':('jevlight.backends.kev_vllm_runtime','KevPoolingNative'),
                    'clef':('jevlight.backends.clef_vllm_runtime','ClefPoolingNative')}
         if config['family']not in delegates:raise ValueError('Unsupported native marker head')

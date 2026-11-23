@@ -58,6 +58,9 @@ NAME_OVERRIDES = {
     'clef-27b': 'Clef 27B', 'clef-flash': 'Clef Flash',
     'pplx-decider-v1.2': 'PPLX Decider v1.2',
     'pplx-decider-flash-v1.2': 'PPLX Decider Flash v1.2',
+    'valen-decision-1.5-0.8b': 'Valen-Decision-1.5 0.8B',
+    'valen-decision-1.5-2b': 'Valen-Decision-1.5 2B',
+    'valen-decision-1.5-4b': 'Valen-Decision-1.5 4B',
 }
 
 # Family -> label, colour.  Colours stay distinguishable on the dark page.

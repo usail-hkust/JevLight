@@ -24,6 +24,11 @@ def prepare_context(root, key):
     elif family == 'valen':
         native = json.loads((weights / 'config.json').read_text())
         supported = native['valen_max_length']  # Dedicated compiler cap, not backbone window.
+    elif family == 'valen-decision-1.5':
+        native = json.loads((weights / 'config.json').read_text())
+        if native.get('valen_decision_version') != '1.5':
+            raise ValueError('Checkpoint is not a Valen-Decision-1.5 release')
+        supported = native['valen_max_length']  # Published compiler cap of the 1.5 release.
     elif family in ('laya', 'von', 'agent-jev', 'nimble', 'gliner2'):
         if family == 'nimble':
             native = json.loads((weights / 'schema_config.json').read_text())

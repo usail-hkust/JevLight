@@ -198,6 +198,12 @@ def prepare_step_backend(backend):
             enable_valen_native_shapes(backend.runtime)
         elif linear != 'author':
             raise ValueError(f'Unsupported native Valen projection: {linear}')
+    elif family == 'valen-decision-1.5':
+        from jevlight.backends.native_row_batch import enable_valen_decision15_full_rows
+        enable_valen_decision15_full_rows(backend.runtime)
+        linear = backend.config.get('batch_linear', 'author')
+        if linear != 'author':
+            raise ValueError(f'Unsupported native Valen-Decision-1.5 projection: {linear}')
     elif family == 'open-jev':
         linear = backend.config.get('batch_linear', 'author')
         if linear == 'native_shape':

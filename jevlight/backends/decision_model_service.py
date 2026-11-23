@@ -560,6 +560,140 @@ class ValenNative:
         return [validate_answers(request, result) for request, result in zip(requests, results, strict=True)]
 
 
+def validate_decision15_answers(request, result):
+    """Benchmark answers as validate_answers; ``bbox`` answers as the release returns them."""
+    questions = request["questions"]
+    boxes = {qid for qid, question in questions.items() if question.get("type") == "bbox"}
+    if not boxes:
+        return validate_answers(request, result)
+    answers = result.get("answers", {})
+    if set(answers) != set(questions):
+        raise ValueError("answer IDs differ from question IDs")
+    for qid in boxes:
+        answer = answers[qid]
+        numbers = [*answer.get("bbox", ()), *answer.get("point", ()), answer.get("confidence")]
+        if (answer.get("type") != "bbox" or len(answer.get("bbox", ())) != 4 or len(answer.get("point", ())) != 2
+                or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in numbers)):
+            raise ValueError("invalid bbox answer")
+        x1, y1, x2, y2 = answer["bbox"]
+        if x1 > x2 or y1 > y2:
+            raise ValueError("bbox edges are out of order")
+    rest = {qid: question for qid, question in questions.items() if qid not in boxes}
+    if rest:
+        validate_answers({"questions": rest}, {"answers": {qid: answers[qid] for qid in rest}})
+    return result
+
+
+class ValenDecision15Native:
+    """Valen-Decision-1.5: block-structured full attention with the released Mixer head.
+
+    Kept apart from ValenNative so the Valen 1.0 path is unchanged. The frozen
+    checkpoint code applies the trained ``bbox_blocks`` mask; this class refuses
+    a checkpoint of another generation and requires the compiler's block ids.
+
+    The benchmark sends text states with ``choice`` and ``noul`` questions. This
+    runtime also accepts what the release adds beyond that: a ``{"messages": [...]}``
+    state with inline images, and ``bbox`` questions answered by the grounding head.
+    Those requests run one at a time through the release's own ``predict``.
+    """
+    decision_version = "1.5"
+    full_attention_mask = "bbox_blocks"
+
+    def __init__(self, config):
+        from transformers import AutoModel
+        self.model = AutoModel.from_pretrained(str(ROOT / config["weights_path"]), trust_remote_code=True,
+                                              dtype="auto", attn_implementation="sdpa", local_files_only=True).to("cuda").eval()
+        published = self.model.config
+        if (getattr(published, "valen_decision_version", None) != self.decision_version
+                or getattr(published, "valen_full_attention_mask", None) != self.full_attention_mask
+                or published.qwen_execution != "shared_state"):
+            raise ValueError("checkpoint is not a Valen-Decision-1.5 shared-state release")
+        if config["max_length"] > published.valen_max_length:
+            raise ValueError("serving limit exceeds published native compiler limit")
+        self.compiler = self.model.make_compiler(execution="shared_state")
+        self.compiler.max_length = config["max_length"]
+
+    @staticmethod
+    def messages_state(request):
+        """A release-native message state, the only form that can carry images."""
+        state = request["state"]
+        return isinstance(state, dict) and set(state) == {"messages"} and isinstance(state["messages"], list)
+
+    @classmethod
+    def visual(cls, request):
+        """An image state or a ``bbox`` question; the benchmark sends neither."""
+        return cls.messages_state(request) or any(
+            isinstance(question, dict) and question.get("type") == "bbox" for question in request["questions"].values())
+
+    def request(self, request):
+        if self.messages_state(request):
+            return {"state": request["state"], "questions": request["questions"]}
+        return {"state": json.dumps(request["state"], ensure_ascii=False), "questions": request["questions"]}
+
+    def compile_visual(self, request):
+        """Token accounting for an image or bbox request, with inline images materialized."""
+        local_images = sys.modules[type(self.model).__module__].local_images
+        with local_images(self.request(request)) as prepared:
+            compiled = self.compiler.compile({"request": prepared})
+        if compiled.inputs is None:
+            raise ValueError("complete shared-state encoding required")
+        for question in compiled.questions:
+            definition = request["questions"][question.qid]
+            if definition["type"] == "choice" and list(question.keys) != list(definition["criteria"]):
+                raise ValueError("native candidate mapping changed")
+        return compiled
+
+    def compile(self, request):
+        if self.visual(request):
+            return self.compile_visual(request)
+        compiled = self.compiler.compile({"request": self.request(request)})
+        if compiled.inputs is None or compiled.media:
+            raise ValueError("complete text-only shared-state encoding required")
+        for question in compiled.questions:
+            definition = request["questions"][question.qid]
+            if definition["type"] == "choice" and list(question.keys) != list(definition["criteria"]):
+                raise ValueError("native candidate mapping changed")
+            # The trained mask reads one block id per token of the shared row.
+            if len(question.branches) != 1 or question.branches[0].segments is None \
+                    or len(question.branches[0].segments) != compiled.logical_tokens:
+                raise ValueError("native block segments are incomplete")
+        return compiled
+
+    def encode(self, request):
+        compiled = self.compile(request)
+        return [{"logical_tokens": compiled.logical_tokens, "compute_tokens": compiled.compute_tokens,
+                 "max_length": self.compiler.max_length, "truncated": False}]
+
+    def native(self, request):
+        return self.model.predict(self.request(request), execution="shared_state")
+
+    def native_batch(self, requests, batch_size):
+        """Use the author's shared-state batch; every row keeps its own block mask."""
+        import importlib
+        import torch
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError('batch_size must be positive')
+        if any(self.visual(request) for request in requests):
+            # Image and bbox requests keep the release's own single-request path.
+            return [validate_decision15_answers(request, self.native(request)) for request in requests]
+        answer = importlib.import_module(type(self.model).__module__.rsplit('.', 1)[0] + '.responses').answer
+        results = []
+        with torch.inference_mode():
+            for start in range(0, len(requests), batch_size):
+                group = [self.compile(request) for request in requests[start:start + batch_size]]
+                rows = self.model.forward_state_batch(group, max_tokens=32768)
+                if len(rows) != len(group):
+                    raise ValueError('native batch result count mismatch')
+                for state, logits in zip(group, rows, strict=True):
+                    if len(logits) != len(state.questions):
+                        raise ValueError('native batch lost decision questions')
+                    results.append({'model': self.model.model_name,
+                        'answers': {q.qid: answer(q, z, 1.0) for q, z in zip(state.questions, logits, strict=True)},
+                        'usage': {'input_tokens': state.logical_tokens, 'output_tokens': 0},
+                        'internal_usage': {'compute_tokens': state.compute_tokens}})
+        return [validate_answers(request, result) for request, result in zip(requests, results, strict=True)]
+
+
 class OpenJevNative:
     def __init__(self, config):
         import torch
@@ -734,6 +868,7 @@ class NativeBackend:
                 self.runtime = {"laya": LayaNative, "von": VonNative, "gliner2": GlinerNative,
                         "kev": KevNative, "agent-jev": AgentNative, "decider": DeciderNative,
                         "clef": ClefNative, "valen": ValenNative, "open-jev": OpenJevNative,
+                        "valen-decision-1.5": ValenDecision15Native,
                         "nimble": NimbleNative, "lev": LevNative}[config["family"]](config)
         else:
             if config.get('inference_engine', 'author') == 'vllm_marker':
@@ -743,7 +878,10 @@ class NativeBackend:
                 self.runtime = {"laya": LayaNative, "von": VonNative, "gliner2": GlinerNative,
                         "kev": KevNative, "agent-jev": AgentNative, "decider": DeciderNative,
                         "clef": ClefNative, "valen": ValenNative, "open-jev": OpenJevNative,
+                        "valen-decision-1.5": ValenDecision15Native,
                         "nimble": NimbleNative, "lev": LevNative}[config["family"]](config)
+        if config['family'] == 'valen-decision-1.5':
+            self.answer_validator = validate_decision15_answers
         self.log_path = None
 
     def evaluate_batch(self, requests, batch_size):
