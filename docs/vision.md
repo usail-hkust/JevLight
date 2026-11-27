@@ -30,6 +30,17 @@ network; current phases come from the environment's control state. No SUMO
 vehicle counts, queues, waiting times or occupancies enter either model stage.
 Missing or failed neighbour perceptions are omitted and treated as unknown.
 
+Camera titles show only `NORTH`, `SOUTH`, `EAST` or `WEST`, following vehicle
+travel direction as returned by VLALight's `calculate_direction` implementation.
+Image filenames and `current_views[].view` retain the travel-direction labels.
+White lane arrows are generated once from the static road network using
+VLALight/TransSimHub's arrow geometry, including cities without bundled arrow
+assets. They depict permitted left/through/right turns, not observed demand or
+the selected signal phase. Vehicles occlude these road markings normally.
+Renderer metadata identifies `travel-direction-and-lane-arrows-v3`; titles use
+30 px letters in a 42 px strip on each 384 x 720 tile. Use a new results directory
+when changing visual annotations.
+
 The decision also receives `count_buckets`, the current phase, the 15-second
 control interval, 5-second yellow time and 10-second green time if switching.
 `unserved_nonempty_observation_steps` counts visual nonempty observations since
@@ -90,6 +101,21 @@ Setup fetches
 the VLALight renderer and scene assets at revision
 `9844f1b6bbd6b4fe80b481d3dd16fadce13c3b5d`, checking Git blob hashes.
 GitHub CLI and old upload archives are not required.
+
+`panda3d-gltf==1.3.0` is required in the simulation environment. The renderer
+explicitly registers its GLB loader and refuses to run without it. Assimp can
+rotate these static maps out of SUMO's ground plane, leaving vehicles against
+sky/vertical terrain without usable road or lane markings. Rendered summaries
+record `renderer_metadata.asset_loader` and `asset_loader_version`. Registration
+alone does not invalidate old Assimp BAM caches, which can leave vehicles
+standing vertically with their chassis below the road. Initialization disables
+disk model caching and clears the in-process model pool, then reuses correctly
+loaded models in memory. Metadata records `asset_model_cache=memory-only-v1`;
+no manual vehicle rotation is applied.
+Inspect the camera images before scheduling paid runs. Results and checkpoints
+made with a defective renderer must remain separate: start corrected experiments
+from time zero with a new `--output`, since old decisions and visual history
+were based on different images. Do not resume those checkpoints as corrected runs.
 
 Open-model launchers require one NVIDIA GPU with at least **70 GiB free VRAM**
 before loading and at least 128 GB system RAM. This is a startup guard, not a
@@ -207,6 +233,23 @@ not provide portable resume. Preserve original results for separate aggregation.
 After changing the policy, use a fresh checkout/output directory rather than
 editing an old plan. The fixed server launcher uses `results/vision_server`;
 it refuses to mix a previous policy's results with this one.
+
+For recovery inside a simulation, opt into visual checkpoints:
+
+```bash
+xvfb-run -a .local/vision-runner/bin/python scripts/run_fair_vision_matrix.py \
+  --models jev-vision --flows jinan-1 --seeds 1 --limit 1 \
+  --execute --resume --checkpoint-every-steps 1 --output results/vision_official_checkpoints
+```
+
+Repeat the same command after interruption. Each committed control step stores
+the SUMO snapshot and RNG, accumulated metrics, request counters, visual history
+and unserved-phase counters. Resume keeps the original trace, archives any
+uncommitted output tail, checks code/config/runtime/image hashes, and restores
+the latest complete boundary. Calls after that boundary may need repeating;
+remote API responses are not guaranteed deterministic. Previously interrupted
+runs without snapshots cannot be recovered this way. Completed conditions are
+still skipped. Checkpoints are local to the original checkout and environment.
 
 Tests cover protocol, baseline configuration equality, adapters and resume
 integrity without paid requests. GPU execution, dependencies and performance

@@ -139,6 +139,34 @@ def test_checkpoint_round_trip_under_long_windows_run_path(checkpoint, tmp_path)
     assert SimulationCheckpoint(root, identity=kwargs['identity']).state['loop']['step'] == 2
 
 
+def test_only_latest_two_commits_survive_successful_save(checkpoint):
+    root, kwargs, _ = checkpoint
+    initial = next(root.glob('checkpoint-*'))
+    second = save_checkpoint(root, **kwargs)
+    kwargs['env'].traci_conn.simulation.saveState = lambda path: Path(path).write_text('<snapshot/>')
+    with pytest.raises(ValueError, match='RNG'):
+        save_checkpoint(root, **kwargs)
+    assert initial.is_dir() and second.is_dir()
+    kwargs['env'].traci_conn.simulation.saveState = lambda path: Path(path).write_text('<snapshot><rngState/></snapshot>')
+    latest = save_checkpoint(root, **kwargs)
+    assert set(root.glob('checkpoint-*')) == {second, latest}
+    assert json.loads((root / 'latest.json').read_text())['generation'] == latest.name
+    assert SimulationCheckpoint(root, identity=kwargs['identity']).state['loop']['step'] == 2
+
+
+def test_old_checkpoint_cleanup_error_does_not_invalidate_new_commit(checkpoint, monkeypatch):
+    import jevlight.simulation_checkpoint as module
+    root, kwargs, _ = checkpoint
+    save_checkpoint(root, **kwargs)
+    def blocked(path):
+        raise PermissionError('file busy')
+    monkeypatch.setattr(module.shutil, 'rmtree', blocked)
+    with pytest.warns(UserWarning, match='Checkpoint committed'):
+        latest = save_checkpoint(root, **kwargs)
+    assert json.loads((root / 'latest.json').read_text())['generation'] == latest.name
+    assert SimulationCheckpoint(root, identity=kwargs['identity']).state['loop']['step'] == 2
+
+
 def test_restore_checks_before_python_state_changes(checkpoint):
     root, kwargs, _ = checkpoint
     cp = SimulationCheckpoint(root, identity=kwargs['identity'])

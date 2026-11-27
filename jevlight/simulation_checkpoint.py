@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -326,6 +327,7 @@ def save_checkpoint(root, *, env, controller, loop, identity, append_paths, reco
         raise ValueError("SUMO/Python time mismatch")
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    previous = checkpoint_manifest(root)[0] if (root / "latest.json").exists() else None
     # Short atomic names keep nested Windows checkpoint files below MAX_PATH.
     generation = Path(tempfile.mkdtemp(prefix="checkpoint-", dir=root))
     # Leave failed generations in place for diagnosis; they never become latest.
@@ -383,6 +385,15 @@ def save_checkpoint(root, *, env, controller, loop, identity, append_paths, reco
                           "manifest_sha256": sha256(generation / "manifest.json")})
     os.replace(pointer, root / "latest.json")
     _sync_dir(root)
+    # Delete only after publishing: a failed save must leave both prior commits intact.
+    for older in root.glob("checkpoint-*"):
+        if (older in (generation, previous) or not older.is_dir() or older.is_symlink()
+                or getattr(older, "is_junction", lambda: False)()):
+            continue
+        try:
+            shutil.rmtree(older)
+        except OSError as exc:
+            warnings.warn(f"Checkpoint committed; could not remove old state {older}: {exc}")
     return generation
 
 
