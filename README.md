@@ -518,6 +518,30 @@ from model scores. The fixed horizon covers departures without clearing the
 network; unfinished trips and teleports must be considered alongside travel
 time. These SUMO results are separate from the historical CityFlow numbers.
 
+### Visual Jev 1.14.0 API cost estimate and New York runner
+
+Two-stage cooperative visual evaluation (`jev-1.14.0`, prompt `vlalight-two-stage-v2-co`, protocol `upstream-3600s-15s-visual-v3`) runs 240 control steps (3600 s at 15 s intervals) per seed and issues **2 API requests per intersection-step** (approach-camera perception followed by cooperative phase selection). Based on TypeSafe's published pricing for `jev-1.14.0` (**$0.042 per 1M input tokens**, **$0.00 output tokens**, see `https://docs.typesafe.ai/models`), the measured Jinan/Hangzhou runs and 48-step New York checkpoint give the following per-round (single-seed) and 3-seed costs:
+
+| Traffic flow | Network (Junctions) | Decisions / seed | API requests / seed | Input tokens / seed | Est. cost / seed | Est. cost / flow (3 seeds) | Basis |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `jinan-1`, `jinan-2`, `jinan-3` | 3×4 (12) | 2,880 | 5,760 | ~49.00M | **~$2.06** | **~$6.17** (~$18.52 for 3 flows) | Measured (9 completed seeds) |
+| `hangzhou-1`, `hangzhou-2` | 4×4 (16) | 3,840 | 7,680 | ~65.84M | **~$2.77** | **~$8.30** (~$16.59 for 2 flows) | Measured (6 completed seeds) |
+| `newyork-1`, `newyork-2` | 28×7 (196) | 47,040 | 94,080 | ~830.81M | **~$34.89** | **~$104.68** (~$209.36 for 2 flows) | Extrapolated (`newyork-1` s1, 48/240 steps) |
+| **Full 7-flow matrix** | **21 seeds total** | **331,200** | **662,400** | **~5.82B** | — | **~$244.47** | $35.11 measured + $209.36 extrapolated |
+
+Notes:
+- Input tokens per intersection-step are slightly higher on New York (`~17,662` vs `~17,013–17,146` on Jinan/Hangzhou): perception image tokens stay nearly fixed (`~12.7k` tokens/decision), while the larger 28×7 interior grid increases four-way neighbour entries in `cooperative_view`.
+- Figures above reflect API-returned `input_tokens` before transient HTTP retries or interrupted steps lost between checkpoints; when running all 6 New York seeds from scratch, budget ~5–12% headroom (**~$220–$235**).
+
+To run only the remaining New York conditions (`newyork-1`, `newyork-2`, seeds 1–3) with exact alignment to the Jinan/Hangzhou `jev-1.14.0` batch (`--checkpoint-every-steps 8`, `--resume`, SUMO 1.28.0):
+
+```bash
+export TYPESAFE_API_KEY="your-key"
+bash scripts/run_jev114_newyork.sh --plan-only                  # verify plan without API/SUMO
+bash scripts/run_jev114_newyork.sh --flows newyork-1 --seeds 1  # single seed (~$35)
+bash scripts/run_jev114_newyork.sh                              # all 6 New York seeds (~$209 net)
+```
+
 ## Tests
 
 ```bash
